@@ -1,0 +1,30 @@
+[package]
+name = "sensor"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "sensor"
+test = false
+bench = false
+
+
+[dependencies]
+shared = { path = "../shared" }
+critical-section.workspace = true
+defmt.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+embedded-graphics.workspace = true
+embedded-hal-bus.workspace = true
+embedded-io-async.workspace = true
+esp-alloc.workspace = true
+esp-backtrace.workspace = true
+esp-bootloader-esp-idf.workspace = true
+esp-hal.workspace = true
+esp-radio.workspace = true
+esp-rtos.workspace = true
+heapless.workspace = true
+static_cell.workspace = true

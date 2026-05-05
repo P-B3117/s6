@@ -1,0 +1,3 @@
+stack-size-threshold = 1024
+large_stack_frames = "deny"
+mem_forget = "deny"
