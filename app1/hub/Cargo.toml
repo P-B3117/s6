@@ -29,3 +29,4 @@ esp-radio.workspace = true
 esp-rtos.workspace = true
 heapless.workspace = true
 static_cell.workspace = true
+trouble-host.workspace = true

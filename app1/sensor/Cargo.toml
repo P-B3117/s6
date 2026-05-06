@@ -11,6 +11,7 @@ bench = false
 
 [dependencies]
 shared = { path = "../shared" }
+bt-hci.workspace = true
 critical-section.workspace = true
 defmt.workspace = true
 embassy-executor.workspace = true
@@ -29,3 +30,4 @@ esp-radio.workspace = true
 esp-rtos.workspace = true
 heapless.workspace = true
 static_cell.workspace = true
+trouble-host.workspace = true
