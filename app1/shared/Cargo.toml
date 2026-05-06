@@ -15,15 +15,8 @@ embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-sync.workspace = true
 embassy-time.workspace = true
-embedded-graphics.workspace = true
-embedded-hal-bus.workspace = true
 embedded-io-async.workspace = true
-esp-alloc.workspace = true
-esp-backtrace.workspace = true
-esp-bootloader-esp-idf.workspace = true
 esp-hal.workspace = true
 esp-println.workspace = true
-esp-radio.workspace = true
-esp-rtos.workspace = true
-heapless.workspace = true
-static_cell.workspace = true
+trouble-host.workspace = true
+wincode = { version = "0.5.3", default-features = false, features = ["derive"] }

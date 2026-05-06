@@ -4,22 +4,30 @@ extern crate alloc;
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_futures::join::join;
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
+use embassy_sync::signal::Signal;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
+use shared::data::MeteoData;
+use shared::uart::{UartMessage, init_uart, uart_runner};
 
 mod ble;
 mod resources;
 
 use resources::*;
 
-use shared::*;
-
 esp_bootloader_esp_idf::esp_app_desc!();
+
+static HUB_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static HUB_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static UPDATE_DATA: Signal<CriticalSectionRawMutex, MeteoData> = Signal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -32,29 +40,41 @@ async fn main(spawner: Spawner) {
     );
     info!("Embassy initialized!");
 
-    //UART
-
-    let uart1 = get_uart(
+    let uart = init_uart(
         peripherals.UART1,
-        peripherals.GPIO10.into(), // TX1D
-        peripherals.GPIO9.into(),  // RX1D
+        peripherals.GPIO10, // TX1D
+        peripherals.GPIO9,  // RX1D
     )
     .await;
+    spawner.spawn(uart_runner(uart, HUB_RX_CHANNEL.sender(), HUB_TX_CHANNEL.receiver()).unwrap());
+    info!("Uart initialized!");
 
-    let (rx, tx) = uart1.split();
-    spawner.spawn(writer(tx, &DATAPIPE0).unwrap());
-    spawner.spawn(reader(rx, &DATAPIPE0, executor0).unwrap());
+    spawner.spawn(ble::ble_runner(resources.bt, MeteoData::default()).unwrap());
+    info!("Bluetooth initialized!");
 
-    //BLE
+    // TODO
+    info!("Sensors initialized!");
 
-    spawner.spawn(ble::run(resources.bt).unwrap());
-
-    loop {
-        ble::send_message(2).await;
-        Timer::after(Duration::from_secs(3)).await;
-        ble::send_message(3).await;
-        Timer::after(Duration::from_secs(3)).await;
-        ble::send_message(4).await;
-        Timer::after(Duration::from_secs(3)).await;
-    }
+    let data = Mutex::<NoopRawMutex, _>::new(MeteoData::default());
+    join(
+        async {
+            loop {
+                let new_data = UPDATE_DATA.wait().await;
+                *data.lock().await = new_data.clone();
+                ble::send_message(new_data).await;
+            }
+        },
+        async {
+            loop {
+                match HUB_RX_CHANNEL.receive().await {
+                    UartMessage::AskData => {
+                        let data = data.lock().await.clone();
+                        HUB_TX_CHANNEL.send(UartMessage::Data(data)).await;
+                    }
+                    _ => {}
+                }
+            }
+        },
+    )
+    .await;
 }

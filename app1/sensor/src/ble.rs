@@ -4,19 +4,21 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Duration;
 use esp_radio::ble::controller::BleConnector;
+use shared::ble::adv::make_adv;
+use shared::data::MeteoData;
 use trouble_host::prelude::*;
 
-type Message = u32;
+static CHANNEL: Channel<CriticalSectionRawMutex, MeteoData, 2> = Channel::new();
 
-const COMPANY_ID: u16 = 0xFFF0;
-static CHANNEL: Channel<CriticalSectionRawMutex, Message, 2> = Channel::new();
-
-pub async fn send_message(message: Message) {
+pub async fn send_message(message: MeteoData) {
     CHANNEL.send(message).await
 }
 
 #[embassy_executor::task]
-pub async fn run(resources: crate::resources::BluetoothResources<'static>) {
+pub async fn ble_runner(
+    resources: crate::resources::BluetoothResources<'static>,
+    initial_data: MeteoData,
+) {
     let address: Address = Address::random([0xff, 0x8f, 0x1a, 0x05, 0xe4, 0xff]);
     info!("Our address = {:?}", address.to_bytes());
 
@@ -29,7 +31,6 @@ pub async fn run(resources: crate::resources::BluetoothResources<'static>) {
     let mut host = stack.build();
 
     let mut adv_data = [0; 64];
-    let mut update_count = 0u32;
 
     let _ = join(host.runner.run(), async {
         let mut params = AdvertisementParameters::default();
@@ -37,45 +38,20 @@ pub async fn run(resources: crate::resources::BluetoothResources<'static>) {
         params.interval_max = Duration::from_millis(250);
         let _advertiser = host
             .peripheral
-            .advertise(&params, make_advertisement(update_count, &mut adv_data))
+            .advertise(&params, make_adv(initial_data, &mut adv_data))
             .await
             .unwrap();
 
         info!("Starting advertising");
         loop {
             let message = CHANNEL.receive().await;
-            update_count = update_count.wrapping_add(1);
+            info!("Updated BLE advertisement data");
 
             host.peripheral
-                .update_adv_data(make_advertisement(message, &mut adv_data))
+                .update_adv_data(make_adv(message, &mut adv_data))
                 .await
                 .unwrap();
-
-            info!("Still running: Updated the beacon {} times", update_count);
         }
     })
     .await;
-}
-
-fn make_advertisement<'d>(message: Message, buffer: &'d mut [u8]) -> Advertisement<'d> {
-    let mut payload = [0u8; 8];
-    payload[0..4].copy_from_slice(&message.to_be_bytes());
-    payload[4..8].copy_from_slice(&message.to_be_bytes());
-
-    let len = AdStructure::encode_slice(
-        &[
-            AdStructure::CompleteLocalName(b"Trouble Beacon"),
-            AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ManufacturerSpecificData {
-                company_identifier: COMPANY_ID,
-                payload: &payload,
-            },
-        ],
-        &mut buffer[..],
-    )
-    .unwrap();
-
-    Advertisement::NonconnectableNonscannableUndirected {
-        adv_data: &buffer[..len],
-    }
 }
