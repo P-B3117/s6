@@ -7,6 +7,7 @@ use esp_backtrace as _;
 use esp_hal::Async;
 use esp_hal::gpio::AnyPin;
 use esp_hal::uart::{AtCmdConfig, Config, Instance, RxConfig, Uart, UartRx, UartTx};
+use heapless::String;
 
 // Read Buffer Size
 pub const BUF_SIZE: usize = 16;
@@ -35,26 +36,6 @@ pub async fn get_uart(
 }
 
 //TODO: use the datapipe to actually write the reader's answer
-// #[embassy_executor::task]
-// pub async fn writer_test(mut tx: UartTx<'static, Async>, period: Duration) {
-//     // use core::fmt::Write;
-//     embedded_io_async::Write::write(
-//         &mut tx,
-//         b"Hello async serial. Enter something ended with EOT (CTRL-D).\r\n",
-//     )
-//     .await
-//     .unwrap();
-//     embedded_io_async::Write::flush(&mut tx).await.unwrap();
-
-//     loop {
-//         write!(&mut tx, "Hello-world").unwrap();
-//         write!(&mut tx, "\r\n").unwrap();
-//         embedded_io_async::Write::flush(&mut tx).await.unwrap();
-//         Timer::after(period).await;
-//     }
-// }
-
-//TODO: use the datapipe to actually write the reader's answer
 #[embassy_executor::task]
 pub async fn writer(
     mut tx: UartTx<'static, Async>,
@@ -69,15 +50,21 @@ pub async fn writer(
 
     loop {
         // copy from pipe into wbuf
-        pipe.read_exact(&mut wbuf).await;
+        let r = pipe.read_exact(&mut wbuf).await;
+        match r {
+            Ok(_) => {
+                // write wbuf to tx
+                embedded_io_async::Write::write_all(&mut tx, &mut wbuf)
+                    .await
+                    .unwrap();
 
-        // write wbuf to tx
-        embedded_io_async::Write::write_all(&mut tx, &mut wbuf)
-            .await
-            .unwrap();
-
-        // flush tx to send the data
-        embedded_io_async::Write::flush(&mut tx).await.unwrap();
+                // flush tx to send the data
+                embedded_io_async::Write::flush(&mut tx).await.unwrap();
+            }
+            Err(e) => {
+                esp_println::println!("Writer Error: {:?}", e);
+            }
+        }
     }
 }
 
@@ -85,7 +72,7 @@ pub async fn writer(
 pub async fn reader(
     mut rx: UartRx<'static, Async>,
     pipe: &'static Pipe<CriticalSectionRawMutex, PIPE_SIZE>,
-    executor: fn([u8; BUF_SIZE]) -> [u8; BUF_SIZE],
+    executor: fn([u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str>,
 ) {
     // Declare read buffer to store Rx characters
     let mut rbuf: [u8; BUF_SIZE] = [0u8; BUF_SIZE];
@@ -96,7 +83,10 @@ pub async fn reader(
             Ok(_) => {
                 let processed = executor(rbuf);
                 // If read succeeds then write recieved characters to pipe
-                pipe.write_all(&processed).await;
+                match processed {
+                    Ok(processed) => pipe.write_all(&processed).await,
+                    Err(e) => esp_println::println!("Executor Error: {}", e),
+                }
             }
             Err(e) => esp_println::println!("RX Error: {:?}", e),
         }

@@ -34,14 +34,14 @@ async fn main(spawner: Spawner) {
 
     //UART
 
-    let uart0 = get_uart(
-        peripherals.UART0,
-        peripherals.GPIO1.into(), // TX0D
-        peripherals.GPIO3.into(), // RX0D
+    let uart1 = get_uart(
+        peripherals.UART1,
+        peripherals.GPIO10.into(), // TX1D
+        peripherals.GPIO9.into(),  // RX1D
     )
     .await;
 
-    let (rx, tx) = uart0.split();
+    let (rx, tx) = uart1.split();
     spawner.spawn(writer(tx, &DATAPIPE0).unwrap());
     spawner.spawn(reader(rx, &DATAPIPE0, executor0).unwrap());
 

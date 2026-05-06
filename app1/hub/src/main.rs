@@ -16,6 +16,8 @@ mod resources;
 
 use resources::*;
 
+use shared::*;
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[esp_rtos::main]
@@ -29,15 +31,31 @@ async fn main(spawner: Spawner) {
     );
     info!("Embassy initialized!");
 
-    spawner.spawn(ble::run(resources.bt).unwrap());
-    spawner.spawn(app_task().unwrap());
-}
+    // UART
 
-#[embassy_executor::task]
-async fn app_task() {
-    loop {
-        let message = ble::next_message().await;
-        info!("hub received message {}", message);
-        // TODO: replace this with your application logic.
-    }
+    let uart0 = get_uart(
+        peripherals.UART0,
+        peripherals.GPIO1.into(), // TX0D
+        peripherals.GPIO3.into(), // RX0D
+    )
+    .await;
+
+    let uart1 = get_uart(
+        peripherals.UART1,
+        peripherals.GPIO10.into(), // TX1D
+        peripherals.GPIO9.into(),  // RX1D
+    )
+    .await;
+
+    let (rx0, tx0) = uart0.split();
+    spawner.spawn(writer(tx0, &DATAPIPE1).unwrap()); // outputs to computer
+    spawner.spawn(reader(rx0, &DATAPIPE0, executor0).unwrap()); // send to writer to sensor station
+
+    let (rx1, tx1) = uart1.split();
+    spawner.spawn(writer(tx1, &DATAPIPE0).unwrap()); // outputs to sensor station
+    spawner.spawn(reader(rx1, &DATAPIPE1, executor1).unwrap()); // send to writer to computer
+
+    // BLE
+
+    spawner.spawn(ble::run(resources.bt).unwrap());
 }

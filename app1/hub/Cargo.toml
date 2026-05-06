@@ -30,3 +30,4 @@ esp-rtos.workspace = true
 heapless.workspace = true
 static_cell.workspace = true
 trouble-host.workspace = true
+phf = { version = "0.13.1", default-features = false, features = ["macros"] }
