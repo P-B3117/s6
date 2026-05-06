@@ -4,6 +4,7 @@ extern crate alloc;
 
 use defmt::info;
 use embassy_executor::Spawner;
+use embassy_time::Duration;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
@@ -12,6 +13,8 @@ use esp_println as _;
 
 mod resources;
 use resources::*;
+
+use shared::*;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -25,4 +28,19 @@ async fn main(spawner: Spawner) {
         SoftwareInterruptControl::new(peripherals.SW_INTERRUPT).software_interrupt0,
     );
     info!("Embassy initialized!");
+
+    //BLE
+
+    //UART
+
+    let uart0 = get_uart(
+        peripherals.UART0,
+        peripherals.GPIO1.into(), // TX0D
+        peripherals.GPIO3.into(), // RX0D
+    )
+    .await;
+
+    let (rx, tx) = uart0.split();
+    spawner.spawn(writer(tx, &DATAPIPE0).unwrap());
+    spawner.spawn(reader(rx, &DATAPIPE0, executor0).unwrap());
 }
