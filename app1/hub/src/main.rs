@@ -84,6 +84,9 @@ async fn main(spawner: Spawner) {
         async {
             loop {
                 let new_data = ble::next_message().await;
+                SERVER_TX_CHANNEL
+                    .send(UartMessage::Data(new_data.clone()))
+                    .await;
                 *data.lock().await = new_data;
             }
         },

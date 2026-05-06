@@ -20,14 +20,17 @@ use shared::uart::{UartMessage, init_uart, uart_runner};
 
 mod ble;
 mod resources;
+mod sensors;
 
 use resources::*;
+
+use crate::sensors::SensorDataUpdate;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 static HUB_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
 static HUB_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static UPDATE_DATA: Signal<CriticalSectionRawMutex, MeteoData> = Signal::new();
+static UPDATE_DATA: Signal<CriticalSectionRawMutex, SensorDataUpdate> = Signal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -52,16 +55,25 @@ async fn main(spawner: Spawner) {
     spawner.spawn(ble::ble_runner(resources.bt, MeteoData::default()).unwrap());
     info!("Bluetooth initialized!");
 
-    // TODO
+    spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
     info!("Sensors initialized!");
 
     let data = Mutex::<NoopRawMutex, _>::new(MeteoData::default());
     join(
         async {
             loop {
-                let new_data = UPDATE_DATA.wait().await;
-                *data.lock().await = new_data.clone();
-                ble::send_message(new_data).await;
+                let update = UPDATE_DATA.wait().await;
+                let mut data = data.lock().await;
+                match update {
+                    SensorDataUpdate::DHT11 {
+                        temperature,
+                        humidity,
+                    } => {
+                        data.humidity = humidity;
+                        data.temperature = temperature;
+                    }
+                }
+                ble::send_message(data.clone()).await;
             }
         },
         async {
