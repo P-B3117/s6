@@ -16,12 +16,17 @@ assign_resources! {
 // Declare Pipe sync primitive to share data among Tx and Rx tasks
 pub static DATAPIPE0: Pipe<CriticalSectionRawMutex, PIPE_SIZE> = Pipe::new();
 
+// Executor between sensor station and base station (will go to computer)
+fn dummy(input: [u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str> {
+    Ok(input)
+}
+
 static MAP0: phf::Map<
     &'static [u8; BUF_SIZE],
-    &'static fn([u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str>,
+    fn([u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str>,
 > = phf::phf_map! {
-    b"hello00000000000" => b"hello00000000000",
-    b"lol0000000000000" => b"wow0000000000000",
+    b"hello00000000000" => dummy,
+    b"lol0000000000000" => dummy,
 };
 
 pub fn executor0(input: [u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str> {
