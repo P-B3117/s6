@@ -21,7 +21,7 @@ pub enum UartMessage {
     Data(MeteoData),
 }
 
-pub async fn init_uart(
+pub fn init_uart(
     uart: impl Instance + 'static,
     tx_pin: impl Into<AnyPin<'static>>,
     rx_pin: impl Into<AnyPin<'static>>,

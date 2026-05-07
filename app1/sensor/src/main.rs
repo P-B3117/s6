@@ -47,8 +47,7 @@ async fn main(spawner: Spawner) {
         peripherals.UART1,
         peripherals.GPIO10, // TX1D
         peripherals.GPIO9,  // RX1D
-    )
-    .await;
+    );
     spawner.spawn(uart_runner(uart, HUB_RX_CHANNEL.sender(), HUB_TX_CHANNEL.receiver()).unwrap());
     info!("Uart initialized!");
 
@@ -56,6 +55,8 @@ async fn main(spawner: Spawner) {
     info!("Bluetooth initialized!");
 
     spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::dps310::runner(resources.dps310, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::light::runner(resources.light, &UPDATE_DATA).unwrap());
     info!("Sensors initialized!");
 
     let data = Mutex::<NoopRawMutex, _>::new(MeteoData::default());
@@ -63,6 +64,7 @@ async fn main(spawner: Spawner) {
         async {
             loop {
                 let update = UPDATE_DATA.wait().await;
+                esp_println::println!("Received update: {:?}", &update);
                 let mut data = data.lock().await;
                 match update {
                     SensorDataUpdate::DHT11 {
@@ -71,6 +73,12 @@ async fn main(spawner: Spawner) {
                     } => {
                         data.humidity = humidity;
                         data.temperature = temperature;
+                    }
+                    SensorDataUpdate::DPS310 { pressure } => {
+                        data.pressure = pressure;
+                    }
+                    SensorDataUpdate::Light { level } => {
+                        data.light_level = level;
                     }
                 }
                 ble::send_message(data.clone()).await;

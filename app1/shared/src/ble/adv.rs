@@ -4,7 +4,7 @@ use trouble_host::prelude::*;
 use wincode::io::Cursor;
 
 pub fn make_adv<'d>(message: MeteoData, buffer: &'d mut [u8]) -> Advertisement<'d> {
-    let mut payload = [0u8; 8];
+    let mut payload = [0u8; 32];
     wincode::serialize_into(Cursor::new(&mut payload[..]), &message).unwrap();
 
     let len = AdStructure::encode_slice(
@@ -30,7 +30,7 @@ pub fn parse_message_from_adv(data: &[u8]) -> Option<MeteoData> {
         if ad_type == 0xFF && payload.len() >= 10 {
             let company_id = u16::from_le_bytes([payload[0], payload[1]]);
             if company_id == COMPANY_ID {
-                let data = wincode::deserialize(&payload[2..12]).ok()?;
+                let data = wincode::deserialize(&payload[2..]).ok()?;
                 return Some(data);
             }
         }

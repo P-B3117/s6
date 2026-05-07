@@ -48,8 +48,7 @@ async fn main(spawner: Spawner) {
         peripherals.UART1,
         peripherals.GPIO10, // TX1D
         peripherals.GPIO9,  // RX1D
-    )
-    .await;
+    );
     spawner.spawn(
         uart_runner(
             uart,
@@ -64,8 +63,7 @@ async fn main(spawner: Spawner) {
         peripherals.UART0,
         peripherals.GPIO1, // TX0D
         peripherals.GPIO3, // RX0D
-    )
-    .await;
+    );
     spawner.spawn(
         uart_runner(
             uart,
