@@ -13,7 +13,9 @@ use crate::data::MeteoData;
 pub const BUF_SIZE: usize = 16;
 pub const PIPE_SIZE: usize = 128;
 pub const UART_SIZE: usize = 128;
-const AT_CMD: u8 = '\r' as u8;
+
+// End of Transmission Character (Carrige Return -> 13 or 0x0D in ASCII)
+const AT_CMD: u8 = 0x0D;
 
 #[derive(SchemaWrite, SchemaRead)]
 pub enum UartMessage {

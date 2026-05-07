@@ -90,22 +90,16 @@ async fn main(spawner: Spawner) {
         },
         async {
             loop {
-                match SERVER_RX_CHANNEL.receive().await {
-                    UartMessage::AskData => {
-                        let data = data.lock().await.clone();
-                        SERVER_TX_CHANNEL.send(UartMessage::Data(data)).await;
-                    }
-                    _ => {}
+                if let UartMessage::AskData = SERVER_RX_CHANNEL.receive().await {
+                    let data = data.lock().await.clone();
+                    SERVER_TX_CHANNEL.send(UartMessage::Data(data)).await;
                 }
             }
         },
         async {
             loop {
-                match SENSOR_RX_CHANNEL.receive().await {
-                    UartMessage::Data(new_data) => {
-                        *data.lock().await = new_data;
-                    }
-                    _ => {}
+                if let UartMessage::Data(new_data) = SENSOR_RX_CHANNEL.receive().await {
+                    *data.lock().await = new_data;
                 }
             }
         },

@@ -33,9 +33,11 @@ pub async fn ble_runner(
     let mut adv_data = [0; 64];
 
     let _ = join(host.runner.run(), async {
-        let mut params = AdvertisementParameters::default();
-        params.interval_min = Duration::from_millis(50);
-        params.interval_max = Duration::from_millis(250);
+        let params = AdvertisementParameters {
+            interval_min: Duration::from_millis(50),
+            interval_max: Duration::from_millis(250),
+            ..Default::default()
+        };
         let _advertiser = host
             .peripheral
             .advertise(&params, make_adv(initial_data, &mut adv_data))

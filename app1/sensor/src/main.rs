@@ -97,12 +97,9 @@ async fn main(spawner: Spawner) {
         },
         async {
             loop {
-                match HUB_RX_CHANNEL.receive().await {
-                    UartMessage::AskData => {
-                        let data = data.lock().await.clone();
-                        HUB_TX_CHANNEL.send(UartMessage::Data(data)).await;
-                    }
-                    _ => {}
+                if let UartMessage::AskData = HUB_RX_CHANNEL.receive().await {
+                    let data = data.lock().await.clone();
+                    HUB_TX_CHANNEL.send(UartMessage::Data(data)).await;
                 }
             }
         },

@@ -59,13 +59,13 @@ pub async fn runner(
         let temperature = if buffer[2] & 0x80 == 0 {
             buffer[2] as i8
         } else {
-            -1 * (buffer[2] as i8 & 0x7F)
+            -(buffer[2] as i8 & 0x7F)
         };
         // let temperature_decimals = buffer[3];
         let checksum = buffer[4];
 
         let sum = buffer[0..=3].iter().sum::<u8>();
-        if checksum != (sum & 0xFF) {
+        if checksum != sum {
             esp_println::println!("DHT11 checksum failed, {:?}", buffer);
             continue;
         }
