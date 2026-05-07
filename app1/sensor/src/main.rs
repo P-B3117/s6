@@ -57,6 +57,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::dps310::runner(resources.dps310, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::light::runner(resources.light, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::rain::runner(resources.rain, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::wind::runner(resources.wind, &UPDATE_DATA).unwrap());
     info!("Sensors initialized!");
 
     let data = Mutex::<NoopRawMutex, _>::new(MeteoData::default());
@@ -79,6 +81,15 @@ async fn main(spawner: Spawner) {
                     }
                     SensorDataUpdate::Light { level } => {
                         data.light_level = level;
+                    }
+                    SensorDataUpdate::WindDirection { direction } => {
+                        data.wind_direction = direction;
+                    }
+                    SensorDataUpdate::WindSpeed { speed } => {
+                        data.wind_speed = speed;
+                    }
+                    SensorDataUpdate::Precipitation { mm } => {
+                        data.precipitation = mm;
                     }
                 }
                 ble::send_message(data.clone()).await;

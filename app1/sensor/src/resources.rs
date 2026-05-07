@@ -5,9 +5,6 @@ assign_resources! {
         bt: BluetoothResources<'d> {
             bt:  BT,
         },
-        // rain: RainResources<'d> {
-        //     gpio:  GPIO19,
-        // },
         dht11: DHT11Resources<'d> {
             pin:  GPIO16,
         },
@@ -20,9 +17,13 @@ assign_resources! {
             adc:  ADC1,
             pin: GPIO34,
         },
-        // wind: WindResources<'d> {
-        //     direction:  GPIO35,
-        //     speed:  GPIO34,
-        // },
+        rain: RainResources<'d> {
+            pin:  GPIO23,
+        },
+        wind: WindResources<'d> {
+            adc:  ADC2,
+            direction:  GPIO35,
+            speed:  GPIO27,
+        },
     }
 }
