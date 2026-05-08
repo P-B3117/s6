@@ -4,21 +4,34 @@ extern crate alloc;
 
 use defmt::info;
 use embassy_executor::Spawner;
+use embassy_futures::join::join3;
+use embassy_sync::{
+    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
+    channel::Channel,
+    mutex::Mutex,
+};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
+use shared::{
+    data::MeteoData,
+    uart::{UartMessage, init_uart, uart_runner},
+};
 
 mod ble;
 mod resources;
 
 use resources::*;
 
-use shared::*;
-
 esp_bootloader_esp_idf::esp_app_desc!();
+
+static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SENSOR_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SERVER_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SERVER_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -31,31 +44,65 @@ async fn main(spawner: Spawner) {
     );
     info!("Embassy initialized!");
 
-    // UART
-
-    let uart0 = get_uart(
-        peripherals.UART0,
-        peripherals.GPIO1.into(), // TX0D
-        peripherals.GPIO3.into(), // RX0D
-    )
-    .await;
-
-    let uart1 = get_uart(
+    let uart = init_uart(
         peripherals.UART1,
-        peripherals.GPIO10.into(), // TX1D
-        peripherals.GPIO9.into(),  // RX1D
+        peripherals.GPIO10, // TX1D
+        peripherals.GPIO9,  // RX1D
+    );
+    spawner.spawn(
+        uart_runner(
+            uart,
+            SERVER_RX_CHANNEL.sender(),
+            SERVER_TX_CHANNEL.receiver(),
+        )
+        .unwrap(),
+    );
+    info!("Server uart initialized!");
+
+    let uart = init_uart(
+        peripherals.UART0,
+        peripherals.GPIO1, // TX0D
+        peripherals.GPIO3, // RX0D
+    );
+    spawner.spawn(
+        uart_runner(
+            uart,
+            SENSOR_RX_CHANNEL.sender(),
+            SENSOR_TX_CHANNEL.receiver(),
+        )
+        .unwrap(),
+    );
+    info!("Sensor uart initialized!");
+
+    spawner.spawn(ble::ble_runner(resources.bt).unwrap());
+    info!("Bluetooth initialized!");
+
+    let data = Mutex::<NoopRawMutex, _>::new(MeteoData::default());
+    join3(
+        async {
+            loop {
+                let new_data = ble::next_message().await;
+                SERVER_TX_CHANNEL
+                    .send(UartMessage::Data(new_data.clone()))
+                    .await;
+                *data.lock().await = new_data;
+            }
+        },
+        async {
+            loop {
+                if let UartMessage::AskData = SERVER_RX_CHANNEL.receive().await {
+                    let data = data.lock().await.clone();
+                    SERVER_TX_CHANNEL.send(UartMessage::Data(data)).await;
+                }
+            }
+        },
+        async {
+            loop {
+                if let UartMessage::Data(new_data) = SENSOR_RX_CHANNEL.receive().await {
+                    *data.lock().await = new_data;
+                }
+            }
+        },
     )
     .await;
-
-    let (rx0, tx0) = uart0.split();
-    spawner.spawn(writer(tx0, &DATAPIPE1).unwrap()); // outputs to computer
-    spawner.spawn(reader(rx0, &DATAPIPE0, executor0).unwrap()); // send to writer to sensor station
-
-    let (rx1, tx1) = uart1.split();
-    spawner.spawn(writer(tx1, &DATAPIPE0).unwrap()); // outputs to sensor station
-    spawner.spawn(reader(rx1, &DATAPIPE1, executor1).unwrap()); // send to writer to computer
-
-    // BLE
-
-    spawner.spawn(ble::run(resources.bt).unwrap());
 }
