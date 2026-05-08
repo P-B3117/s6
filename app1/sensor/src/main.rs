@@ -15,7 +15,7 @@ use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
 use shared::data::MeteoData;
-use shared::uart::{UartMessage, init_uart, uart_runner};
+use shared::uart::{UartMessage, init_uart, uart_runner_wrapper0};
 
 mod ble;
 mod resources;
@@ -47,7 +47,9 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO10, // TX1D
         peripherals.GPIO9,  // RX1D
     );
-    spawner.spawn(uart_runner(uart, HUB_RX_CHANNEL.sender(), HUB_TX_CHANNEL.receiver()).unwrap());
+    spawner.spawn(
+        uart_runner_wrapper0(uart, HUB_RX_CHANNEL.sender(), HUB_TX_CHANNEL.receiver()).unwrap(),
+    );
     info!("Uart initialized!");
 
     spawner.spawn(ble::ble_runner(resources.bt, MeteoData::default()).unwrap());
