@@ -80,7 +80,7 @@ async fn main(spawner: Spawner) {
                     SensorDataUpdate::WindSpeed { speed } => data.wind_speed = speed,
                     SensorDataUpdate::Precipitation { mm } => data.precipitation = mm,
                 }
-                ble::send_message(update).await;
+                ble::send_message(update);
             }
         },
         async {

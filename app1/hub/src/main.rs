@@ -5,39 +5,31 @@ extern crate alloc;
 use defmt::info;
 use embassy_executor::Spawner;
 use embassy_futures::join::join3;
-use embassy_sync::{
-    blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex},
-    channel::Channel,
-    mutex::Mutex,
-};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::ram;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
-use shared::{
-    data::MeteoData,
-    uart::{UartMessage, init_uart, uart_runner_wrapper0, uart_runner_wrapper1},
-};
+use shared::data::MeteoData;
+use shared::uart::{UartMessage, init_uart, uart_runner_wrapper0, uart_runner_wrapper1};
 
 mod ble;
 mod resources;
 
 use resources::*;
 
+use crate::ble::BleDataUpdate;
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const MAX_MESSAGES: usize = 3;
-
-static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
-    Channel::new();
-static SENSOR_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
-    Channel::new();
-static SERVER_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
-    Channel::new();
-static SERVER_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
-    Channel::new();
+static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SENSOR_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SERVER_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SERVER_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -49,15 +41,13 @@ async fn main(spawner: Spawner) {
         SoftwareInterruptControl::new(peripherals.SW_INTERRUPT).software_interrupt0,
     );
     info!("Embassy initialized!");
+    let data = Mutex::<CriticalSectionRawMutex, _>::new(MeteoData::default());
 
     let uart = init_uart(
         peripherals.UART0,
         peripherals.GPIO1, // TX0D
         peripherals.GPIO3, // RX0D
     );
-
-    info!("UART0 Totally initialized!");
-
     spawner.spawn(
         uart_runner_wrapper0(
             uart,
@@ -73,9 +63,6 @@ async fn main(spawner: Spawner) {
         peripherals.GPIO10, // TX1D
         peripherals.GPIO9,  // RX1D
     );
-
-    info!("UART1 initialized!");
-
     spawner.spawn(
         uart_runner_wrapper1(
             uart,
@@ -84,21 +71,28 @@ async fn main(spawner: Spawner) {
         )
         .unwrap(),
     );
-
     info!("Server uart initialized!");
 
     spawner.spawn(ble::ble_runner(resources.bt).unwrap());
     info!("Bluetooth initialized!");
 
-    let data = Mutex::<NoopRawMutex, _>::new(MeteoData::default());
     join3(
         async {
             loop {
-                let new_data = ble::next_message().await;
+                let update = ble::next_message().await;
+                let mut data = data.lock().await;
+                match update {
+                    BleDataUpdate::Temperature { temperature } => data.temperature = temperature,
+                    BleDataUpdate::Humidity { humidity } => data.humidity = humidity,
+                    BleDataUpdate::Pressure { pressure } => data.pressure = pressure,
+                    BleDataUpdate::Light { level } => data.light_level = level,
+                    BleDataUpdate::WindDirection { direction } => data.wind_direction = direction,
+                    BleDataUpdate::WindSpeed { speed } => data.wind_speed = speed,
+                    BleDataUpdate::Precipitation { mm } => data.precipitation = mm,
+                }
                 SERVER_TX_CHANNEL
-                    .send(UartMessage::Data(new_data.clone()))
+                    .send(UartMessage::Data(data.clone()))
                     .await;
-                *data.lock().await = new_data;
             }
         },
         async {

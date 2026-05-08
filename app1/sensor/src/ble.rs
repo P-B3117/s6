@@ -1,7 +1,7 @@
 use defmt::info;
 use embassy_futures::join::join;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+use embassy_sync::signal::Signal;
 use embassy_time::Timer;
 use esp_radio::ble::controller::BleConnector;
 use shared::ble::{GattServer, SENSOR_ADDR};
@@ -9,10 +9,10 @@ use trouble_host::prelude::*;
 
 use crate::sensors::SensorDataUpdate;
 
-static CHANNEL: Channel<CriticalSectionRawMutex, SensorDataUpdate, 2> = Channel::new();
+static CHANNEL: Signal<CriticalSectionRawMutex, SensorDataUpdate> = Signal::new();
 
-pub async fn send_message(message: SensorDataUpdate) {
-    CHANNEL.send(message).await
+pub fn send_message(message: SensorDataUpdate) {
+    CHANNEL.signal(message)
 }
 
 #[embassy_executor::task]
@@ -39,7 +39,7 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
         loop {
             if let Ok(conn) = advertise(&mut host.peripheral, &server).await {
                 loop {
-                    if let Err(e) = match CHANNEL.receive().await {
+                    if let Err(e) = match CHANNEL.wait().await {
                         SensorDataUpdate::Temperature { temperature } => {
                             server
                                 .meteo_service
