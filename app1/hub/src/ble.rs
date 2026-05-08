@@ -48,6 +48,7 @@ impl EventHandler for Printer {
                 continue;
             }
 
+            info!("adv report: {:?}", report.data);
             if let Some(message) = parse_message_from_adv(report.data) {
                 let _ = CHANNEL.try_send(message);
             }

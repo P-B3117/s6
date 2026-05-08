@@ -24,38 +24,17 @@ pub fn make_adv<'d>(message: MeteoData, buffer: &'d mut [u8]) -> Advertisement<'
 }
 
 pub fn parse_message_from_adv(data: &[u8]) -> Option<MeteoData> {
-    parse_ad_structures(data, |ad_type, payload| {
-        if ad_type == 0xFF && payload.len() >= 10 {
-            let company_id = u16::from_le_bytes([payload[0], payload[1]]);
-            if company_id == COMPANY_ID {
-                let data = serde_json::from_slice(&payload[2..]).ok()?;
+    for ad in AdStructure::decode(data) {
+        if let Ok(AdStructure::ManufacturerSpecificData {
+            company_identifier,
+            payload,
+        }) = ad
+        {
+            if company_identifier == COMPANY_ID {
+                let data = serde_json::from_slice(payload).ok()?;
                 return Some(data);
             }
         }
-        None
-    })
-}
-
-fn parse_ad_structures<T, F>(data: &[u8], mut f: F) -> Option<T>
-where
-    F: FnMut(u8, &[u8]) -> Option<T>,
-{
-    let mut i = 0;
-    while i < data.len() {
-        let len = data[i] as usize;
-        if len == 0 {
-            break;
-        }
-        let end = i + 1 + len;
-        if end > data.len() {
-            break;
-        }
-        let ad_type = data[i + 1];
-        let payload = &data[i + 2..end];
-        if let Some(value) = f(ad_type, payload) {
-            return Some(value);
-        }
-        i = end;
     }
     None
 }
