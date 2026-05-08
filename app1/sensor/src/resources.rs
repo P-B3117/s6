@@ -25,8 +25,8 @@ static MAP0: phf::Map<
     &'static [u8; BUF_SIZE],
     fn([u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str>,
 > = phf::phf_map! {
-    b"hello00000000000" => dummy,
-    b"lol0000000000000" => dummy,
+    b"hello00000000000" => dummy, // sensor getter goes there
+    b"lol0000000000000" => dummy, // sensor getter goes there
 };
 
 pub fn executor0(input: [u8; BUF_SIZE]) -> Result<[u8; BUF_SIZE], &'static str> {
