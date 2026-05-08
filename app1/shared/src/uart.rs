@@ -1,10 +1,9 @@
-use defmt::info;
 use embassy_futures::join::join;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 use esp_hal::Async;
 use esp_hal::gpio::AnyPin;
-use esp_hal::uart::{AtCmdConfig, Config, Instance, RxConfig, Uart};
+use esp_hal::uart::{AtCmdConfig, Config, Instance, Uart};
 use serde::{Deserialize, Serialize};
 
 use crate::data::MeteoData;
@@ -29,22 +28,12 @@ pub fn init_uart(
     tx_pin: impl Into<AnyPin<'static>>,
     rx_pin: impl Into<AnyPin<'static>>,
 ) -> Uart<'static, Async> {
-    let config = Config::default().with_rx(RxConfig::default());
-
-    info!("UART  config initialized!");
-
-    let mut uart = Uart::new(uart, config)
+    let mut uart = Uart::new(uart, Config::default())
         .unwrap()
         .with_tx(tx_pin.into())
         .with_rx(rx_pin.into())
         .into_async();
-
-    info!("UART created!");
-
     uart.set_at_cmd(AtCmdConfig::default().with_cmd_char(AT_CMD));
-
-    info!("UART AT_CMD set!");
-
     uart
 }
 
@@ -71,19 +60,25 @@ pub async fn uart_runner(
     message_channel: Sender<'static, CriticalSectionRawMutex, UartMessage, 3>,
     send_message_channel: Receiver<'static, CriticalSectionRawMutex, UartMessage, 3>,
 ) {
-    info!("UART start task!");
     let mut read_buffer = [0u8; BUF_SIZE];
     let (mut rx, mut tx) = uart.split();
-    info!("UART start loop!");
 
     join(
         async {
+            let mut read = 0;
             loop {
-                info!("UART reader!");
                 match rx.read_async(&mut read_buffer).await {
                     Ok(len) => {
-                        let data = serde_json::from_slice(&read_buffer[..len]).unwrap();
-                        message_channel.send(data).await;
+                        read += len as usize;
+                        if read_buffer[..read].contains(&AT_CMD) {
+                            match serde_json::from_slice(&read_buffer[..read]) {
+                                Ok(data) => message_channel.send(data).await,
+                                Err(e) => {
+                                    esp_println::println!("JSON Error: {:?}", e)
+                                }
+                            }
+                            read = 0;
+                        }
                     }
                     Err(e) => esp_println::println!("RX Error: {:?}", e),
                 }
@@ -91,7 +86,6 @@ pub async fn uart_runner(
         },
         async {
             loop {
-                info!("UART writer!");
                 let data = send_message_channel.receive().await;
                 let payload = serde_json::to_string(&data).unwrap();
                 tx.write_async(payload.as_bytes()).await.unwrap();
