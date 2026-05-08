@@ -61,8 +61,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(
         uart_runner_wrapper0(
             uart,
-            SENSOR_RX_CHANNEL.sender(),
-            SENSOR_TX_CHANNEL.receiver(),
+            SERVER_RX_CHANNEL.sender(),
+            SERVER_TX_CHANNEL.receiver(),
         )
         .unwrap(),
     );

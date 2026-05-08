@@ -67,14 +67,15 @@ pub async fn uart_runner(
         async {
             let mut read = 0;
             loop {
-                match rx.read_async(&mut read_buffer).await {
+                match rx.read_async(&mut read_buffer[read..]).await {
                     Ok(len) => {
                         read += len as usize;
                         if read_buffer[..read].contains(&AT_CMD) {
                             match serde_json::from_slice(&read_buffer[..read]) {
                                 Ok(data) => message_channel.send(data).await,
                                 Err(e) => {
-                                    esp_println::println!("JSON Error: {:?}", e)
+                                    esp_println::println!("JSON Error: {:?}", e);
+                                    esp_println::println!("{:?}", &read_buffer[..read]);
                                 }
                             }
                             read = 0;
@@ -89,6 +90,7 @@ pub async fn uart_runner(
                 let data = send_message_channel.receive().await;
                 let payload = serde_json::to_string(&data).unwrap();
                 tx.write_async(payload.as_bytes()).await.unwrap();
+                tx.write_async(b"\n").await.unwrap();
                 tx.flush_async().await.unwrap();
             }
         },
