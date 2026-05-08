@@ -1,3 +1,4 @@
+use defmt::info;
 use embassy_futures::join::join;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
@@ -28,31 +29,58 @@ pub fn init_uart(
     tx_pin: impl Into<AnyPin<'static>>,
     rx_pin: impl Into<AnyPin<'static>>,
 ) -> Uart<'static, Async> {
-    let config =
-        Config::default().with_rx(RxConfig::default().with_fifo_full_threshold(UART_SIZE as u16));
+    let config = Config::default().with_rx(RxConfig::default());
+
+    info!("UART  config initialized!");
 
     let mut uart = Uart::new(uart, config)
         .unwrap()
         .with_tx(tx_pin.into())
         .with_rx(rx_pin.into())
         .into_async();
+
+    info!("UART created!");
+
     uart.set_at_cmd(AtCmdConfig::default().with_cmd_char(AT_CMD));
+
+    info!("UART AT_CMD set!");
+
     uart
 }
 
 #[embassy_executor::task]
+pub async fn uart_runner_wrapper0(
+    uart: Uart<'static, Async>,
+    message_channel: Sender<'static, CriticalSectionRawMutex, UartMessage, 3>,
+    send_message_channel: Receiver<'static, CriticalSectionRawMutex, UartMessage, 3>,
+) {
+    uart_runner(uart, message_channel, send_message_channel).await;
+}
+
+#[embassy_executor::task]
+pub async fn uart_runner_wrapper1(
+    uart: Uart<'static, Async>,
+    message_channel: Sender<'static, CriticalSectionRawMutex, UartMessage, 3>,
+    send_message_channel: Receiver<'static, CriticalSectionRawMutex, UartMessage, 3>,
+) {
+    uart_runner(uart, message_channel, send_message_channel).await;
+}
+
 pub async fn uart_runner(
     uart: Uart<'static, Async>,
     message_channel: Sender<'static, CriticalSectionRawMutex, UartMessage, 3>,
     send_message_channel: Receiver<'static, CriticalSectionRawMutex, UartMessage, 3>,
 ) {
+    info!("UART start task!");
     let mut read_buffer = [0u8; BUF_SIZE];
     let mut write_buffer = [0u8; BUF_SIZE];
     let (mut rx, mut tx) = uart.split();
+    info!("UART start loop!");
 
     join(
         async {
             loop {
+                info!("UART reader!");
                 match rx.read_async(&mut read_buffer).await {
                     Ok(len) => {
                         let data = wincode::deserialize(&read_buffer[..len]).unwrap();
@@ -64,6 +92,7 @@ pub async fn uart_runner(
         },
         async {
             loop {
+                info!("UART writer!");
                 let data = send_message_channel.receive().await;
                 wincode::serialize_into(&mut Cursor::new(&mut write_buffer[..]), &data).unwrap();
                 tx.write_async(&write_buffer).await.unwrap();

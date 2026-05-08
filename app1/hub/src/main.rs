@@ -18,7 +18,7 @@ use esp_hal::timer::timg::TimerGroup;
 use esp_println as _;
 use shared::{
     data::MeteoData,
-    uart::{UartMessage, init_uart, uart_runner},
+    uart::{UartMessage, init_uart, uart_runner_wrapper0, uart_runner_wrapper1},
 };
 
 mod ble;
@@ -28,10 +28,16 @@ use resources::*;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static SENSOR_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static SERVER_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static SERVER_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+const MAX_MESSAGES: usize = 3;
+
+static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
+    Channel::new();
+static SENSOR_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
+    Channel::new();
+static SERVER_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
+    Channel::new();
+static SERVER_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, MAX_MESSAGES> =
+    Channel::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -45,27 +51,15 @@ async fn main(spawner: Spawner) {
     info!("Embassy initialized!");
 
     let uart = init_uart(
-        peripherals.UART1,
-        peripherals.GPIO10, // TX1D
-        peripherals.GPIO9,  // RX1D
-    );
-    spawner.spawn(
-        uart_runner(
-            uart,
-            SERVER_RX_CHANNEL.sender(),
-            SERVER_TX_CHANNEL.receiver(),
-        )
-        .unwrap(),
-    );
-    info!("Server uart initialized!");
-
-    let uart = init_uart(
         peripherals.UART0,
         peripherals.GPIO1, // TX0D
         peripherals.GPIO3, // RX0D
     );
+
+    info!("UART0 Totally initialized!");
+
     spawner.spawn(
-        uart_runner(
+        uart_runner_wrapper0(
             uart,
             SENSOR_RX_CHANNEL.sender(),
             SENSOR_TX_CHANNEL.receiver(),
@@ -73,6 +67,25 @@ async fn main(spawner: Spawner) {
         .unwrap(),
     );
     info!("Sensor uart initialized!");
+
+    let uart = init_uart(
+        peripherals.UART1,
+        peripherals.GPIO10, // TX1D
+        peripherals.GPIO9,  // RX1D
+    );
+
+    info!("UART1 initialized!");
+
+    spawner.spawn(
+        uart_runner_wrapper1(
+            uart,
+            SENSOR_RX_CHANNEL.sender(),
+            SENSOR_TX_CHANNEL.receiver(),
+        )
+        .unwrap(),
+    );
+
+    info!("Server uart initialized!");
 
     spawner.spawn(ble::ble_runner(resources.bt).unwrap());
     info!("Bluetooth initialized!");
