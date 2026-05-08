@@ -8,7 +8,6 @@ use embassy_futures::join::join;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
-use embassy_sync::signal::Signal;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
@@ -30,7 +29,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 
 static HUB_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
 static HUB_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static UPDATE_DATA: Signal<CriticalSectionRawMutex, SensorDataUpdate> = Signal::new();
+static UPDATE_DATA: Channel<CriticalSectionRawMutex, SensorDataUpdate, 10> = Channel::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -56,7 +55,7 @@ async fn main(spawner: Spawner) {
 
     spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::dps310::runner(resources.dps310, &UPDATE_DATA).unwrap());
-    spawner.spawn(sensors::light::runner(resources.light, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::adc::runner(resources.adc, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::rain::runner(resources.rain, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::wind::runner(resources.wind, &UPDATE_DATA).unwrap());
     info!("Sensors initialized!");
@@ -65,7 +64,7 @@ async fn main(spawner: Spawner) {
     join(
         async {
             loop {
-                let update = UPDATE_DATA.wait().await;
+                let update = UPDATE_DATA.receive().await;
                 esp_println::println!("Received update: {:?}", &update);
                 let mut data = data.lock().await;
                 match update {

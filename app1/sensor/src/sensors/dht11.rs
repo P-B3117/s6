@@ -1,7 +1,7 @@
 // Inspired from https://github.com/rekkun/esp32-dht11-rs-embassy
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
+use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::gpio::{DriveMode, Flex, InputConfig, OutputConfig};
 
@@ -10,7 +10,7 @@ use crate::sensors::SensorDataUpdate;
 #[embassy_executor::task]
 pub async fn runner(
     resources: crate::resources::DHT11Resources<'static>,
-    update_data: &'static Signal<CriticalSectionRawMutex, SensorDataUpdate>,
+    update_data: &'static Channel<CriticalSectionRawMutex, SensorDataUpdate, 10>,
 ) {
     let mut buffer = [0u8; 5];
     let mut pin = Flex::new(resources.pin);
@@ -70,9 +70,11 @@ pub async fn runner(
             continue;
         }
 
-        update_data.signal(SensorDataUpdate::DHT11 {
-            temperature,
-            humidity,
-        });
+        update_data
+            .send(SensorDataUpdate::DHT11 {
+                temperature,
+                humidity,
+            })
+            .await;
     }
 }

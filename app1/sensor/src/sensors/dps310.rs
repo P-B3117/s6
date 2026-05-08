@@ -1,7 +1,7 @@
 // Inspired from https://github.com/perrylson/rust-dps310-driver
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
+use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use esp_hal::i2c::master::{Config, I2c};
 use esp_hal::time::Rate;
@@ -45,7 +45,7 @@ struct Calibration {
 #[embassy_executor::task]
 pub async fn runner(
     resources: crate::resources::DPS310Resources<'static>,
-    update_data: &'static Signal<CriticalSectionRawMutex, SensorDataUpdate>,
+    update_data: &'static Channel<CriticalSectionRawMutex, SensorDataUpdate, 10>,
 ) {
     let i2c_config = Config::default().with_frequency(Rate::from_khz(400));
 
@@ -118,9 +118,11 @@ pub async fn runner(
             + press_sc * (cal.c10 as f64 + press_sc * (cal.c20 as f64 + press_sc * cal.c30 as f64))
             + temp_sc * (cal.c01 as f64 + press_sc * (cal.c11 as f64 + press_sc * cal.c21 as f64));
 
-        update_data.signal(SensorDataUpdate::DPS310 {
-            pressure: pressure_comp as u32,
-        });
+        update_data
+            .send(SensorDataUpdate::DPS310 {
+                pressure: pressure_comp as u32,
+            })
+            .await;
     }
 }
 
