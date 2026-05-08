@@ -5,20 +5,20 @@ use embassy_sync::channel::{Receiver, Sender};
 use esp_hal::Async;
 use esp_hal::gpio::AnyPin;
 use esp_hal::uart::{AtCmdConfig, Config, Instance, RxConfig, Uart};
-use wincode::io::Cursor;
-use wincode::{SchemaRead, SchemaWrite};
+use serde::{Deserialize, Serialize};
 
 use crate::data::MeteoData;
 
 // Read Buffer Size
-pub const BUF_SIZE: usize = 16;
+pub const BUF_SIZE: usize = 512;
 pub const PIPE_SIZE: usize = 128;
 pub const UART_SIZE: usize = 128;
 
 // End of Transmission Character (Carrige Return -> 13 or 0x0D in ASCII)
 const AT_CMD: u8 = 0x0D;
 
-#[derive(SchemaWrite, SchemaRead)]
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum UartMessage {
     AskData,
     Data(MeteoData),
@@ -73,7 +73,6 @@ pub async fn uart_runner(
 ) {
     info!("UART start task!");
     let mut read_buffer = [0u8; BUF_SIZE];
-    let mut write_buffer = [0u8; BUF_SIZE];
     let (mut rx, mut tx) = uart.split();
     info!("UART start loop!");
 
@@ -83,7 +82,7 @@ pub async fn uart_runner(
                 info!("UART reader!");
                 match rx.read_async(&mut read_buffer).await {
                     Ok(len) => {
-                        let data = wincode::deserialize(&read_buffer[..len]).unwrap();
+                        let data = serde_json::from_slice(&read_buffer[..len]).unwrap();
                         message_channel.send(data).await;
                     }
                     Err(e) => esp_println::println!("RX Error: {:?}", e),
@@ -94,8 +93,8 @@ pub async fn uart_runner(
             loop {
                 info!("UART writer!");
                 let data = send_message_channel.receive().await;
-                wincode::serialize_into(&mut Cursor::new(&mut write_buffer[..]), &data).unwrap();
-                tx.write_async(&write_buffer).await.unwrap();
+                let payload = serde_json::to_string(&data).unwrap();
+                tx.write_async(payload.as_bytes()).await.unwrap();
                 tx.flush_async().await.unwrap();
             }
         },

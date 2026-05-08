@@ -30,7 +30,7 @@ pub async fn ble_runner(
         .set_random_address(address);
     let mut host = stack.build();
 
-    let mut adv_data = [0; 64];
+    let mut adv_data = [0; 512];
 
     let _ = join(host.runner.run(), async {
         let params = AdvertisementParameters {

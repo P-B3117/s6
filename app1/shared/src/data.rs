@@ -1,6 +1,6 @@
-use wincode::{SchemaRead, SchemaWrite};
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Clone, SchemaWrite, SchemaRead)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct MeteoData {
     pub light_level: u8,     // percents
     pub temperature: i8,     // celsius

@@ -1,6 +1,6 @@
 pub mod dht11;
 pub mod dps310;
-pub mod light;
+pub mod adc;
 pub mod rain;
 pub mod wind;
 
