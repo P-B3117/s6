@@ -2,7 +2,7 @@
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Instant, Timer};
+use embassy_time::{Duration, Instant, Timer, block_for};
 use esp_hal::gpio::{DriveMode, Flex, InputConfig, OutputConfig};
 
 use crate::sensors::SensorDataUpdate;
@@ -20,36 +20,40 @@ pub async fn runner(
     pin.apply_input_config(&input_config);
 
     loop {
-        Timer::after_secs(1).await;
+        Timer::after_secs(2).await;
 
-        // Send start signal
         pin.set_output_enable(true);
         pin.set_low();
-        Timer::after_millis(20).await;
+        block_for(Duration::from_millis(20));
         pin.set_high();
-        Timer::after_micros(40).await;
-
-        pin.set_output_enable(false);
+        block_for(Duration::from_micros(40));
         pin.set_input_enable(true);
 
-        // Sensor response
-        pin.wait_for_low().await; // 80us low
-        pin.wait_for_high().await; // 80us high
-        pin.wait_for_low().await; // begin first bit
+        let start = Instant::now();
+        while pin.is_high() {
+            if start.elapsed().as_millis() > 1000 {
+                esp_println::println!("DHT11 Wait for low timeout.");
+                continue;
+            }
+        }
 
-        // Read data
+        if pin.is_low() {
+            block_for(Duration::from_micros(80));
+            if pin.is_low() {
+                esp_println::println!("DHT11 Wait for high timeout.");
+                continue;
+            }
+        }
+        block_for(Duration::from_micros(80));
         buffer.fill(0);
-        for i in 0..40 {
-            pin.wait_for_high().await;
-
-            // HIGH duration determines bit value
-            let start = Instant::now();
-            pin.wait_for_low().await;
-            let elapsed = start.elapsed();
-
-            buffer[i / 8] <<= 1;
-            if elapsed > Duration::from_micros(50) {
-                buffer[i / 8] |= 1;
+        for byte in 0..5 {
+            for bit in 0..8u8 {
+                while pin.is_low() {}
+                block_for(Duration::from_micros(30));
+                if pin.is_high() {
+                    buffer[byte] |= 1 << (7 - bit);
+                }
+                while pin.is_high() {}
             }
         }
 

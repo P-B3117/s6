@@ -11,7 +11,6 @@ use crate::sensors::SensorDataUpdate;
 const SENSOR_ADDR: u8 = 0x77;
 
 // Registers
-const PROD_ID_REG_ADDR: u8 = 0x0D;
 const COEFFS_ADDR: u8 = 0x10;
 
 const PRS_CFG_ADDR: u8 = 0x06;
@@ -21,13 +20,8 @@ const MEAS_CFG_ADDR: u8 = 0x08;
 const PRESSURE_ADDR: u8 = 0x00;
 const TEMP_ADDR: u8 = 0x03;
 
-// Expected chip ID
-const PRODUCT_ID: u8 = 0x10;
-
 // Oversampling scale factors from datasheet
-const SCALE_FACTORS: [f64; 8] = [
-    524288.0, 1572864.0, 3670016.0, 7864320.0, 253952.0, 516096.0, 1040384.0, 2088960.0,
-];
+const SCALE_FACTORS: f64 = 3670016.0;
 
 #[derive(Debug)]
 struct Calibration {
@@ -58,13 +52,6 @@ pub async fn runner(
     // Allow sensor startup
     Timer::after(Duration::from_millis(50)).await;
 
-    // Verify product ID
-    let mut product_id = [0u8; 1];
-    i2c.write_read_async(SENSOR_ADDR, &[PROD_ID_REG_ADDR], &mut product_id)
-        .await
-        .unwrap();
-    assert_eq!(product_id[0], PRODUCT_ID, "Invalid DPS310 product ID");
-
     // Read calibration coefficients
     let mut coeffs = [0u8; 18];
     i2c.write_read_async(SENSOR_ADDR, &[COEFFS_ADDR], &mut coeffs)
@@ -74,15 +61,11 @@ pub async fn runner(
     esp_println::println!("Calibration: {:?}", cal);
 
     // Configure sensor (pressure + temperature oversampling)
-    // Oversampling x8
-    // bit pattern depends on datasheet table
-    let prs_oversampling = 0x05;
-    let tmp_oversampling = 0x05;
-
-    i2c.write_async(SENSOR_ADDR, &[PRS_CFG_ADDR, prs_oversampling])
+    // Oversampling x4
+    i2c.write_async(SENSOR_ADDR, &[TMP_CFG_ADDR, 0x82])
         .await
         .unwrap();
-    i2c.write_async(SENSOR_ADDR, &[TMP_CFG_ADDR, tmp_oversampling])
+    i2c.write_async(SENSOR_ADDR, &[PRS_CFG_ADDR, 0x02])
         .await
         .unwrap();
 
@@ -109,8 +92,8 @@ pub async fn runner(
         let raw_press = sign_extend_24(u32::from_be_bytes([0, pbuf[0], pbuf[1], pbuf[2]]) >> 8);
 
         // Compensation
-        let temp_sc = raw_temp as f64 / SCALE_FACTORS[tmp_oversampling as usize];
-        let press_sc = raw_press as f64 / SCALE_FACTORS[prs_oversampling as usize];
+        let temp_sc = raw_temp as f64 / SCALE_FACTORS;
+        let press_sc = raw_press as f64 / SCALE_FACTORS;
 
         let _temp_comp = cal.c0 as f64 * 0.5 + cal.c1 as f64 * temp_sc;
 
@@ -120,7 +103,7 @@ pub async fn runner(
 
         update_data
             .send(SensorDataUpdate::DPS310 {
-                pressure: pressure_comp as u32,
+                pressure: (pressure_comp / 10.) as u32,
             })
             .await;
     }
