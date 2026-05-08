@@ -3,6 +3,7 @@ use embassy_futures::join::join;
 use embassy_futures::select::{Either, Either6, select, select6};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_time::Timer;
 use esp_radio::ble::controller::BleConnector;
 use shared::ble::SENSOR_ADDR;
 use trouble_host::prelude::*;
@@ -56,169 +57,293 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
         },
     };
 
-    info!("Scanning for peripheral...");
     let _ = join(host.runner.run(), async {
-        info!("Connecting");
+        loop {
+            info!("Connecting");
 
-        let conn = host.central.connect(&config).await.unwrap();
-        info!("Connected, creating gatt client");
+            let conn = match host.central.connect(&config).await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    info!("Connect failed: {:?}", err);
+                    Timer::after_secs(2).await;
+                    continue;
+                }
+            };
+            info!("Connected, creating gatt client");
 
-        let client = GattClient::<_, DefaultPacketPool, 10>::new(&stack, &conn)
-            .await
-            .unwrap();
+            let client = match GattClient::<_, DefaultPacketPool, 10>::new(&stack, &conn).await {
+                Ok(client) => client,
+                Err(err) => {
+                    info!("Gatt client init failed: {:?}", err);
+                    conn.disconnect();
+                    Timer::after_secs(2).await;
+                    continue;
+                }
+            };
 
-        let _ = join(client.task(), async {
-            info!("Looking for environmental sensing service");
-            let services = client
-                .services_by_uuid(&Uuid::new_short(service::ENVIRONMENTAL_SENSING.to_u16()))
-                .await
-                .unwrap();
-            let service = services.first().unwrap().clone();
-
-            info!("Subscribing notifications");
-            let characteristic = client
-                .characteristic_by_uuid::<u8>(
-                    &service,
-                    &Uuid::new_short(characteristic::LUMINOUS_INTENSITY.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut light_level = client.subscribe(&characteristic, false).await.unwrap();
-
-            let characteristic = client
-                .characteristic_by_uuid::<i8>(
-                    &service,
-                    &Uuid::new_short(characteristic::TEMPERATURE.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut temperature = client.subscribe(&characteristic, false).await.unwrap();
-
-            let characteristic = client
-                .characteristic_by_uuid::<u8>(
-                    &service,
-                    &Uuid::new_short(characteristic::HUMIDITY.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut humidity = client.subscribe(&characteristic, false).await.unwrap();
-
-            let characteristic = client
-                .characteristic_by_uuid::<u32>(
-                    &service,
-                    &Uuid::new_short(characteristic::PRESSURE.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut pressure = client.subscribe(&characteristic, false).await.unwrap();
-
-            let characteristic = client
-                .characteristic_by_uuid::<f32>(
-                    &service,
-                    &Uuid::new_short(characteristic::RAINFALL.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut precipitation = client.subscribe(&characteristic, false).await.unwrap();
-
-            let characteristic = client
-                .characteristic_by_uuid::<f32>(
-                    &service,
-                    &Uuid::new_short(characteristic::APPARENT_WIND_DIRECTION.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut wind_direction = client.subscribe(&characteristic, false).await.unwrap();
-
-            let characteristic = client
-                .characteristic_by_uuid::<f32>(
-                    &service,
-                    &Uuid::new_short(characteristic::APPARENT_WIND_SPEED.to_u16()),
-                )
-                .await
-                .unwrap();
-            let mut wind_speed = client.subscribe(&characteristic, false).await.unwrap();
-
-            info!("All subscribtions done");
-
-            loop {
-                match select6(
-                    light_level.next(),
-                    temperature.next(),
-                    humidity.next(),
-                    pressure.next(),
-                    precipitation.next(),
-                    select(wind_direction.next(), wind_speed.next()),
-                )
-                .await
+            let notifications = async {
+                info!("Looking for environmental sensing service");
+                let services = match client
+                    .services_by_uuid(&Uuid::new_short(service::ENVIRONMENTAL_SENSING.to_u16()))
+                    .await
                 {
-                    Either6::First(light_level) => {
-                        CHANNEL
-                            .send(BleDataUpdate::Light {
-                                level: light_level.as_ref()[0],
-                            })
-                            .await
+                    Ok(services) => services,
+                    Err(err) => {
+                        info!("Service discovery failed: {:?}", err);
+                        return;
                     }
-                    Either6::Second(temperature) => {
-                        CHANNEL
-                            .send(BleDataUpdate::Temperature {
-                                temperature: temperature.as_ref()[0] as i8,
-                            })
-                            .await
+                };
+                let Some(service) = services.first().cloned() else {
+                    info!("Environmental sensing service not found");
+                    return;
+                };
+
+                info!("Subscribing notifications");
+                let characteristic = match client
+                    .characteristic_by_uuid::<u8>(
+                        &service,
+                        &Uuid::new_short(characteristic::LUMINOUS_INTENSITY.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Light level characteristic lookup failed: {:?}", err);
+                        return;
                     }
-                    Either6::Third(humidity) => {
-                        CHANNEL
-                            .send(BleDataUpdate::Humidity {
-                                humidity: humidity.as_ref()[0],
-                            })
-                            .await
+                };
+                let mut light_level = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Light level subscribe failed: {:?}", err);
+                        return;
                     }
-                    Either6::Fourth(pressure) => {
-                        if let Some(pressure) = decode_u32(pressure.as_ref()) {
-                            CHANNEL.send(BleDataUpdate::Pressure { pressure }).await
-                        } else {
-                            info!(
-                                "Pressure update had invalid length: {}",
-                                pressure.as_ref().len()
-                            );
+                };
+
+                let characteristic = match client
+                    .characteristic_by_uuid::<i8>(
+                        &service,
+                        &Uuid::new_short(characteristic::TEMPERATURE.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Temperature characteristic lookup failed: {:?}", err);
+                        return;
+                    }
+                };
+                let mut temperature = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Temperature subscribe failed: {:?}", err);
+                        return;
+                    }
+                };
+
+                let characteristic = match client
+                    .characteristic_by_uuid::<u8>(
+                        &service,
+                        &Uuid::new_short(characteristic::HUMIDITY.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Humidity characteristic lookup failed: {:?}", err);
+                        return;
+                    }
+                };
+                let mut humidity = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Humidity subscribe failed: {:?}", err);
+                        return;
+                    }
+                };
+
+                let characteristic = match client
+                    .characteristic_by_uuid::<u32>(
+                        &service,
+                        &Uuid::new_short(characteristic::PRESSURE.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Pressure characteristic lookup failed: {:?}", err);
+                        return;
+                    }
+                };
+                let mut pressure = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Pressure subscribe failed: {:?}", err);
+                        return;
+                    }
+                };
+
+                let characteristic = match client
+                    .characteristic_by_uuid::<f32>(
+                        &service,
+                        &Uuid::new_short(characteristic::RAINFALL.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Precipitation characteristic lookup failed: {:?}", err);
+                        return;
+                    }
+                };
+                let mut precipitation = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Precipitation subscribe failed: {:?}", err);
+                        return;
+                    }
+                };
+
+                let characteristic = match client
+                    .characteristic_by_uuid::<f32>(
+                        &service,
+                        &Uuid::new_short(characteristic::APPARENT_WIND_DIRECTION.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Wind direction characteristic lookup failed: {:?}", err);
+                        return;
+                    }
+                };
+                let mut wind_direction = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Wind direction subscribe failed: {:?}", err);
+                        return;
+                    }
+                };
+
+                let characteristic = match client
+                    .characteristic_by_uuid::<f32>(
+                        &service,
+                        &Uuid::new_short(characteristic::APPARENT_WIND_SPEED.to_u16()),
+                    )
+                    .await
+                {
+                    Ok(characteristic) => characteristic,
+                    Err(err) => {
+                        info!("Wind speed characteristic lookup failed: {:?}", err);
+                        return;
+                    }
+                };
+                let mut wind_speed = match client.subscribe(&characteristic, false).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        info!("Wind speed subscribe failed: {:?}", err);
+                        return;
+                    }
+                };
+
+                info!("All subscriptions done");
+
+                loop {
+                    match select(
+                        conn.next(),
+                        select6(
+                            light_level.next(),
+                            temperature.next(),
+                            humidity.next(),
+                            pressure.next(),
+                            precipitation.next(),
+                            select(wind_direction.next(), wind_speed.next()),
+                        ),
+                    )
+                    .await
+                    {
+                        Either::First(ConnectionEvent::Disconnected { reason }) => {
+                            info!("Disconnected: {:?}", reason);
+                            break;
                         }
-                    }
-                    Either6::Fifth(precipitation) => {
-                        if let Some(mm) = decode_f32(precipitation.as_ref()) {
-                            CHANNEL.send(BleDataUpdate::Precipitation { mm }).await
-                        } else {
-                            info!(
-                                "Precipitation update had invalid length: {}",
-                                precipitation.as_ref().len()
-                            );
-                        }
-                    }
-                    Either6::Sixth(Either::First(wind_direction)) => {
-                        if let Some(direction) = decode_f32(wind_direction.as_ref()) {
-                            CHANNEL
-                                .send(BleDataUpdate::WindDirection { direction })
-                                .await
-                        } else {
-                            info!(
-                                "Wind direction update had invalid length: {}",
-                                wind_direction.as_ref().len()
-                            );
-                        }
-                    }
-                    Either6::Sixth(Either::Second(wind_speed)) => {
-                        if let Some(speed) = decode_f32(wind_speed.as_ref()) {
-                            CHANNEL.send(BleDataUpdate::WindSpeed { speed }).await
-                        } else {
-                            info!(
-                                "Wind speed update had invalid length: {}",
-                                wind_speed.as_ref().len()
-                            );
-                        }
+                        Either::First(_) => {}
+                        Either::Second(update) => match update {
+                            Either6::First(light_level) => {
+                                CHANNEL
+                                    .send(BleDataUpdate::Light {
+                                        level: light_level.as_ref()[0],
+                                    })
+                                    .await
+                            }
+                            Either6::Second(temperature) => {
+                                CHANNEL
+                                    .send(BleDataUpdate::Temperature {
+                                        temperature: temperature.as_ref()[0] as i8,
+                                    })
+                                    .await
+                            }
+                            Either6::Third(humidity) => {
+                                CHANNEL
+                                    .send(BleDataUpdate::Humidity {
+                                        humidity: humidity.as_ref()[0],
+                                    })
+                                    .await
+                            }
+                            Either6::Fourth(pressure) => {
+                                if let Some(pressure) = decode_u32(pressure.as_ref()) {
+                                    CHANNEL.send(BleDataUpdate::Pressure { pressure }).await
+                                } else {
+                                    info!(
+                                        "Pressure update had invalid length: {}",
+                                        pressure.as_ref().len()
+                                    );
+                                }
+                            }
+                            Either6::Fifth(precipitation) => {
+                                if let Some(mm) = decode_f32(precipitation.as_ref()) {
+                                    CHANNEL.send(BleDataUpdate::Precipitation { mm }).await
+                                } else {
+                                    info!(
+                                        "Precipitation update had invalid length: {}",
+                                        precipitation.as_ref().len()
+                                    );
+                                }
+                            }
+                            Either6::Sixth(Either::First(wind_direction)) => {
+                                if let Some(direction) = decode_f32(wind_direction.as_ref()) {
+                                    CHANNEL
+                                        .send(BleDataUpdate::WindDirection { direction })
+                                        .await
+                                } else {
+                                    info!(
+                                        "Wind direction update had invalid length: {}",
+                                        wind_direction.as_ref().len()
+                                    );
+                                }
+                            }
+                            Either6::Sixth(Either::Second(wind_speed)) => {
+                                if let Some(speed) = decode_f32(wind_speed.as_ref()) {
+                                    CHANNEL.send(BleDataUpdate::WindSpeed { speed }).await
+                                } else {
+                                    info!(
+                                        "Wind speed update had invalid length: {}",
+                                        wind_speed.as_ref().len()
+                                    );
+                                }
+                            }
+                        },
                     }
                 }
+            };
+
+            match select(client.task(), notifications).await {
+                Either::First(Err(err)) => info!("Gatt client task failed: {:?}", err),
+                _ => {}
             }
-        })
-        .await;
+
+            conn.disconnect();
+            Timer::after_secs(2).await;
+        }
     })
     .await;
 }

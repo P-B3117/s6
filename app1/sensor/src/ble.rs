@@ -1,8 +1,8 @@
 use defmt::info;
 use embassy_futures::join::join;
+use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
-use embassy_time::Timer;
 use esp_radio::ble::controller::BleConnector;
 use shared::ble::{GattServer, SENSOR_ADDR};
 use trouble_host::prelude::*;
@@ -39,41 +39,48 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
         loop {
             if let Ok(conn) = advertise(&mut host.peripheral, &server).await {
                 loop {
-                    if let Err(e) = match CHANNEL.wait().await {
-                        SensorDataUpdate::Temperature { temperature } => {
-                            server
-                                .meteo_service
-                                .temperature
-                                .notify(&conn, &temperature)
-                                .await
+                    match select(conn.next(), CHANNEL.wait()).await {
+                        Either::First(GattConnectionEvent::Disconnected { reason }) => {
+                            info!("[adv] disconnected: {:?}", reason);
+                            break;
                         }
-                        SensorDataUpdate::Humidity { humidity } => {
-                            server.meteo_service.humidity.notify(&conn, &humidity).await
+                        Either::First(_) => {}
+                        Either::Second(update) => {
+                            if let Err(e) = match update {
+                                SensorDataUpdate::Temperature { temperature } => {
+                                    server
+                                        .meteo_service
+                                        .temperature
+                                        .notify(&conn, &temperature)
+                                        .await
+                                }
+                                SensorDataUpdate::Humidity { humidity } => {
+                                    server.meteo_service.humidity.notify(&conn, &humidity).await
+                                }
+                                SensorDataUpdate::Pressure { pressure } => {
+                                    server.meteo_service.pressure.notify(&conn, &pressure).await
+                                }
+                                SensorDataUpdate::Light { level } => {
+                                    server.meteo_service.light_level.notify(&conn, &level).await
+                                }
+                                SensorDataUpdate::WindDirection { direction } => {
+                                    server
+                                        .meteo_service
+                                        .wind_direction
+                                        .notify(&conn, &direction)
+                                        .await
+                                }
+                                SensorDataUpdate::WindSpeed { speed } => {
+                                    server.meteo_service.wind_speed.notify(&conn, &speed).await
+                                }
+                                SensorDataUpdate::Precipitation { mm } => {
+                                    server.meteo_service.precipitation.notify(&conn, &mm).await
+                                }
+                            } {
+                                esp_println::println!("BLE notify error: {:?}", e);
+                            }
                         }
-                        SensorDataUpdate::Pressure { pressure } => {
-                            server.meteo_service.pressure.notify(&conn, &pressure).await
-                        }
-                        SensorDataUpdate::Light { level } => {
-                            server.meteo_service.light_level.notify(&conn, &level).await
-                        }
-                        SensorDataUpdate::WindDirection { direction } => {
-                            server
-                                .meteo_service
-                                .wind_direction
-                                .notify(&conn, &direction)
-                                .await
-                        }
-                        SensorDataUpdate::WindSpeed { speed } => {
-                            server.meteo_service.wind_speed.notify(&conn, &speed).await
-                        }
-                        SensorDataUpdate::Precipitation { mm } => {
-                            server.meteo_service.precipitation.notify(&conn, &mm).await
-                        }
-                    } {
-                        esp_println::println!("BLE notify error: {:?}", e);
                     }
-
-                    Timer::after_secs(2).await;
                 }
             }
         }
