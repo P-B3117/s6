@@ -7,7 +7,7 @@ pub struct GattServer {
     pub meteo_service: GattObjectTransferService,
 }
 
-#[gatt_service(uuid = service::OBJECT_TRANSFER)]
+#[gatt_service(uuid = service::ENVIRONMENTAL_SENSING)]
 pub struct GattObjectTransferService {
     #[characteristic(uuid = characteristic::LUMINOUS_INTENSITY, write, read, notify)]
     pub light_level: u8,

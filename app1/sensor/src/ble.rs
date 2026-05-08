@@ -24,7 +24,7 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
     let controller: ExternalController<_, 2> = ExternalController::new(connector);
 
     let mut resources = HostResources::new();
-    let stack = trouble_host::new::<_, DefaultPacketPool, 0, 0, 27>(controller, &mut resources)
+    let stack = trouble_host::new::<_, DefaultPacketPool, 3, 3, 3>(controller, &mut resources)
         .set_random_address(address);
     let mut host = stack.build();
 
@@ -86,10 +86,11 @@ async fn advertise<'values, 'server, C: Controller>(
     server: &'server GattServer<'values>,
 ) -> Result<GattConnection<'values, 'server, DefaultPacketPool>, BleHostError<C::Error>> {
     let mut advertiser_data = [0; 31];
+    let service_uuid = service::ENVIRONMENTAL_SENSING.to_u16().to_le_bytes();
     let len = AdStructure::encode_slice(
         &[
             AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-            AdStructure::ServiceUuids16(&[[0x0f, 0x18]]),
+            AdStructure::ServiceUuids16(&[service_uuid]),
             AdStructure::CompleteLocalName(b"APP 1 Sensor"),
         ],
         &mut advertiser_data[..],

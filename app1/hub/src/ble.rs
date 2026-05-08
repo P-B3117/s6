@@ -23,6 +23,16 @@ pub async fn next_message() -> BleDataUpdate {
     CHANNEL.receive().await
 }
 
+fn decode_u32(value: &[u8]) -> Option<u32> {
+    let bytes: [u8; 4] = value.try_into().ok()?;
+    Some(u32::from_le_bytes(bytes))
+}
+
+fn decode_f32(value: &[u8]) -> Option<f32> {
+    let bytes: [u8; 4] = value.try_into().ok()?;
+    Some(f32::from_le_bytes(bytes))
+}
+
 #[embassy_executor::task]
 pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>) {
     let address = Address::random([0xff, 0x8f, 0x1b, 0x05, 0xe4, 0xff]);
@@ -32,8 +42,9 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
     let controller = ExternalController::<_, 20>::new(connector);
 
     let mut resources = HostResources::new();
-    let stack = trouble_host::new::<_, DefaultPacketPool, 0, 3, 20>(controller, &mut resources)
+    let stack = trouble_host::new::<_, DefaultPacketPool, 3, 3, 3>(controller, &mut resources)
         .set_random_address(address);
+
     let mut host = stack.build();
 
     let target = Address::random(SENSOR_ADDR);
@@ -57,9 +68,9 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
             .unwrap();
 
         let _ = join(client.task(), async {
-            info!("Looking for battery service");
+            info!("Looking for environmental sensing service");
             let services = client
-                .services_by_uuid(&Uuid::new_short(service::OBJECT_TRANSFER.to_u16()))
+                .services_by_uuid(&Uuid::new_short(service::ENVIRONMENTAL_SENSING.to_u16()))
                 .await
                 .unwrap();
             let service = services.first().unwrap().clone();
@@ -163,32 +174,46 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
                             .await
                     }
                     Either6::Fourth(pressure) => {
-                        CHANNEL
-                            .send(BleDataUpdate::Pressure {
-                                pressure: pressure.as_ref()[0] as u32,
-                            })
-                            .await
+                        if let Some(pressure) = decode_u32(pressure.as_ref()) {
+                            CHANNEL.send(BleDataUpdate::Pressure { pressure }).await
+                        } else {
+                            info!(
+                                "Pressure update had invalid length: {}",
+                                pressure.as_ref().len()
+                            );
+                        }
                     }
                     Either6::Fifth(precipitation) => {
-                        CHANNEL
-                            .send(BleDataUpdate::Precipitation {
-                                mm: precipitation.as_ref()[0] as f32,
-                            })
-                            .await
+                        if let Some(mm) = decode_f32(precipitation.as_ref()) {
+                            CHANNEL.send(BleDataUpdate::Precipitation { mm }).await
+                        } else {
+                            info!(
+                                "Precipitation update had invalid length: {}",
+                                precipitation.as_ref().len()
+                            );
+                        }
                     }
                     Either6::Sixth(Either::First(wind_direction)) => {
-                        CHANNEL
-                            .send(BleDataUpdate::WindDirection {
-                                direction: wind_direction.as_ref()[0] as f32,
-                            })
-                            .await
+                        if let Some(direction) = decode_f32(wind_direction.as_ref()) {
+                            CHANNEL
+                                .send(BleDataUpdate::WindDirection { direction })
+                                .await
+                        } else {
+                            info!(
+                                "Wind direction update had invalid length: {}",
+                                wind_direction.as_ref().len()
+                            );
+                        }
                     }
                     Either6::Sixth(Either::Second(wind_speed)) => {
-                        CHANNEL
-                            .send(BleDataUpdate::WindSpeed {
-                                speed: wind_speed.as_ref()[0] as f32,
-                            })
-                            .await
+                        if let Some(speed) = decode_f32(wind_speed.as_ref()) {
+                            CHANNEL.send(BleDataUpdate::WindSpeed { speed }).await
+                        } else {
+                            info!(
+                                "Wind speed update had invalid length: {}",
+                                wind_speed.as_ref().len()
+                            );
+                        }
                     }
                 }
             }
