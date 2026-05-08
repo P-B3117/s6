@@ -102,7 +102,7 @@ pub async fn runner(
             + temp_sc * (cal.c01 as f64 + press_sc * (cal.c11 as f64 + press_sc * cal.c21 as f64));
 
         update_data
-            .send(SensorDataUpdate::DPS310 {
+            .send(SensorDataUpdate::Pressure {
                 pressure: (pressure_comp / 10.) as u32,
             })
             .await;

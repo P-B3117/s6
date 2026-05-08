@@ -21,3 +21,4 @@ esp-println.workspace = true
 serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1.0.149", default-features = false, features = ["alloc"] }
 trouble-host.workspace = true
+static_cell.workspace = true

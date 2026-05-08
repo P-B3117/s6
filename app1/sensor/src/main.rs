@@ -52,7 +52,7 @@ async fn main(spawner: Spawner) {
     );
     info!("Uart initialized!");
 
-    spawner.spawn(ble::ble_runner(resources.bt, MeteoData::default()).unwrap());
+    spawner.spawn(ble::ble_runner(resources.bt).unwrap());
     info!("Bluetooth initialized!");
 
     spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
@@ -70,30 +70,17 @@ async fn main(spawner: Spawner) {
                 esp_println::println!("Received update: {:?}", &update);
                 let mut data = data.lock().await;
                 match update {
-                    SensorDataUpdate::DHT11 {
-                        temperature,
-                        humidity,
-                    } => {
-                        data.humidity = humidity;
-                        data.temperature = temperature;
-                    }
-                    SensorDataUpdate::DPS310 { pressure } => {
-                        data.pressure = pressure;
-                    }
-                    SensorDataUpdate::Light { level } => {
-                        data.light_level = level;
-                    }
+                    SensorDataUpdate::Temperature { temperature } => data.temperature = temperature,
+                    SensorDataUpdate::Humidity { humidity } => data.humidity = humidity,
+                    SensorDataUpdate::Pressure { pressure } => data.pressure = pressure,
+                    SensorDataUpdate::Light { level } => data.light_level = level,
                     SensorDataUpdate::WindDirection { direction } => {
-                        data.wind_direction = direction;
+                        data.wind_direction = direction
                     }
-                    SensorDataUpdate::WindSpeed { speed } => {
-                        data.wind_speed = speed;
-                    }
-                    SensorDataUpdate::Precipitation { mm } => {
-                        data.precipitation = mm;
-                    }
+                    SensorDataUpdate::WindSpeed { speed } => data.wind_speed = speed,
+                    SensorDataUpdate::Precipitation { mm } => data.precipitation = mm,
                 }
-                ble::send_message(data.clone()).await;
+                ble::send_message(update).await;
             }
         },
         async {

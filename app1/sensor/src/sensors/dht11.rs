@@ -75,10 +75,10 @@ pub async fn runner(
         }
 
         update_data
-            .send(SensorDataUpdate::DHT11 {
-                temperature,
-                humidity,
-            })
+            .send(SensorDataUpdate::Temperature { temperature })
+            .await;
+        update_data
+            .send(SensorDataUpdate::Humidity { humidity })
             .await;
     }
 }
