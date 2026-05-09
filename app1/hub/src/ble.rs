@@ -1,26 +1,17 @@
 use defmt::info;
 use embassy_futures::join::join;
-use embassy_futures::select::{Either, Either6, select, select6};
+use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Timer;
 use esp_radio::ble::controller::BleConnector;
 use shared::ble::SENSOR_ADDR;
+use shared::data::MeteoData;
 use trouble_host::prelude::*;
 
-pub enum BleDataUpdate {
-    Temperature { temperature: i8 },
-    Humidity { humidity: u8 },
-    Pressure { pressure: u32 },
-    Light { level: u8 },
-    WindDirection { direction: f32 },
-    WindSpeed { speed: f32 },
-    Precipitation { mm: f32 },
-}
+static CHANNEL: Channel<CriticalSectionRawMutex, MeteoData, 10> = Channel::new();
 
-static CHANNEL: Channel<CriticalSectionRawMutex, BleDataUpdate, 10> = Channel::new();
-
-pub async fn next_message() -> BleDataUpdate {
+pub async fn next_message() -> MeteoData {
     CHANNEL.receive().await
 }
 
@@ -34,6 +25,62 @@ fn decode_f32(value: &[u8]) -> Option<f32> {
     Some(f32::from_le_bytes(bytes))
 }
 
+async fn read_full_snapshot<C, P, const MAX_SERVICES: usize>(
+    client: &GattClient<'_, C, P, MAX_SERVICES>,
+    light_level: &Characteristic<u8>,
+    temperature: &Characteristic<i8>,
+    humidity: &Characteristic<u8>,
+    pressure: &Characteristic<u32>,
+    precipitation: &Characteristic<f32>,
+    wind_direction: &Characteristic<f32>,
+    wind_speed: &Characteristic<f32>,
+) where
+    C: Controller,
+    P: PacketPool,
+{
+    let mut buf_1 = [0u8; 1];
+    let mut buf_4 = [0u8; 4];
+    let mut snapshot = MeteoData::default();
+
+    if let Ok(1) = client.read_characteristic(light_level, &mut buf_1).await {
+        snapshot.light_level = buf_1[0];
+    }
+
+    if let Ok(1) = client.read_characteristic(temperature, &mut buf_1).await {
+        snapshot.temperature = buf_1[0] as i8;
+    }
+
+    if let Ok(1) = client.read_characteristic(humidity, &mut buf_1).await {
+        snapshot.humidity = buf_1[0];
+    }
+
+    if let Ok(4) = client.read_characteristic(pressure, &mut buf_4).await {
+        if let Some(value) = decode_u32(&buf_4) {
+            snapshot.pressure = value;
+        }
+    }
+
+    if let Ok(4) = client.read_characteristic(precipitation, &mut buf_4).await {
+        if let Some(mm) = decode_f32(&buf_4) {
+            snapshot.precipitation = mm;
+        }
+    }
+
+    if let Ok(4) = client.read_characteristic(wind_direction, &mut buf_4).await {
+        if let Some(direction) = decode_f32(&buf_4) {
+            snapshot.wind_direction = direction;
+        }
+    }
+
+    if let Ok(4) = client.read_characteristic(wind_speed, &mut buf_4).await {
+        if let Some(speed) = decode_f32(&buf_4) {
+            snapshot.wind_speed = speed;
+        }
+    }
+
+    CHANNEL.send(snapshot).await;
+}
+
 #[embassy_executor::task]
 pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>) {
     let address = Address::random([0xff, 0x8f, 0x1b, 0x05, 0xe4, 0xff]);
@@ -43,7 +90,7 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
     let controller = ExternalController::<_, 20>::new(connector);
 
     let mut resources = HostResources::new();
-    let stack = trouble_host::new::<_, DefaultPacketPool, 3, 3, 3>(controller, &mut resources)
+    let stack = trouble_host::new::<_, DefaultPacketPool, 8, 8, 8>(controller, &mut resources)
         .set_random_address(address);
 
     let mut host = stack.build();
@@ -71,7 +118,7 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
             };
             info!("Connected, creating gatt client");
 
-            let client = match GattClient::<_, DefaultPacketPool, 10>::new(&stack, &conn).await {
+            let client = match GattClient::<_, DefaultPacketPool, 16>::new(&stack, &conn).await {
                 Ok(client) => client,
                 Err(err) => {
                     info!("Gatt client init failed: {:?}", err);
@@ -98,240 +145,98 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
                     return;
                 };
 
-                info!("Subscribing notifications");
-                let characteristic = match client
+                info!("Discovering characteristics");
+                let light_level_characteristic = client
                     .characteristic_by_uuid::<u8>(
                         &service,
                         &Uuid::new_short(characteristic::LUMINOUS_INTENSITY.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Light level characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut light_level = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Light level subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                let characteristic = match client
+                let temperature_characteristic = client
                     .characteristic_by_uuid::<i8>(
                         &service,
                         &Uuid::new_short(characteristic::TEMPERATURE.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Temperature characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut temperature = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Temperature subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                let characteristic = match client
+                let humidity_characteristic = client
                     .characteristic_by_uuid::<u8>(
                         &service,
                         &Uuid::new_short(characteristic::HUMIDITY.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Humidity characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut humidity = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Humidity subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                let characteristic = match client
+                let pressure_characteristic = client
                     .characteristic_by_uuid::<u32>(
                         &service,
                         &Uuid::new_short(characteristic::PRESSURE.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Pressure characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut pressure = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Pressure subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                let characteristic = match client
+                let precipitation_characteristic = client
                     .characteristic_by_uuid::<f32>(
                         &service,
                         &Uuid::new_short(characteristic::RAINFALL.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Precipitation characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut precipitation = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Precipitation subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                let characteristic = match client
+                let wind_direction_characteristic = client
                     .characteristic_by_uuid::<f32>(
                         &service,
                         &Uuid::new_short(characteristic::APPARENT_WIND_DIRECTION.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Wind direction characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut wind_direction = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Wind direction subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                let characteristic = match client
+                let wind_speed_characteristic = client
                     .characteristic_by_uuid::<f32>(
                         &service,
                         &Uuid::new_short(characteristic::APPARENT_WIND_SPEED.to_u16()),
                     )
                     .await
-                {
-                    Ok(characteristic) => characteristic,
-                    Err(err) => {
-                        info!("Wind speed characteristic lookup failed: {:?}", err);
-                        return;
-                    }
-                };
-                let mut wind_speed = match client.subscribe(&characteristic, false).await {
-                    Ok(listener) => listener,
-                    Err(err) => {
-                        info!("Wind speed subscribe failed: {:?}", err);
-                        return;
-                    }
-                };
+                    .unwrap();
 
-                info!("All subscriptions done");
-
-                loop {
-                    match select(
-                        conn.next(),
-                        select6(
-                            light_level.next(),
-                            temperature.next(),
-                            humidity.next(),
-                            pressure.next(),
-                            precipitation.next(),
-                            select(wind_direction.next(), wind_speed.next()),
-                        ),
+                info!("Subscribing to notifications");
+                let updates_characteristic = client
+                    .characteristic_by_uuid::<f32>(
+                        &service,
+                        &Uuid::new_short(characteristic::NEW_ALERT.to_u16()),
                     )
                     .await
-                    {
+                    .unwrap();
+                let mut notifications = client
+                    .subscribe(&updates_characteristic, false)
+                    .await
+                    .unwrap();
+
+                info!("Updates subscription ready");
+
+                loop {
+                    match select(conn.next(), notifications.next()).await {
                         Either::First(ConnectionEvent::Disconnected { reason }) => {
                             info!("Disconnected: {:?}", reason);
                             break;
                         }
                         Either::First(_) => {}
-                        Either::Second(update) => match update {
-                            Either6::First(light_level) => {
-                                CHANNEL
-                                    .send(BleDataUpdate::Light {
-                                        level: light_level.as_ref()[0],
-                                    })
-                                    .await
-                            }
-                            Either6::Second(temperature) => {
-                                CHANNEL
-                                    .send(BleDataUpdate::Temperature {
-                                        temperature: temperature.as_ref()[0] as i8,
-                                    })
-                                    .await
-                            }
-                            Either6::Third(humidity) => {
-                                CHANNEL
-                                    .send(BleDataUpdate::Humidity {
-                                        humidity: humidity.as_ref()[0],
-                                    })
-                                    .await
-                            }
-                            Either6::Fourth(pressure) => {
-                                if let Some(pressure) = decode_u32(pressure.as_ref()) {
-                                    CHANNEL.send(BleDataUpdate::Pressure { pressure }).await
-                                } else {
-                                    info!(
-                                        "Pressure update had invalid length: {}",
-                                        pressure.as_ref().len()
-                                    );
-                                }
-                            }
-                            Either6::Fifth(precipitation) => {
-                                if let Some(mm) = decode_f32(precipitation.as_ref()) {
-                                    CHANNEL.send(BleDataUpdate::Precipitation { mm }).await
-                                } else {
-                                    info!(
-                                        "Precipitation update had invalid length: {}",
-                                        precipitation.as_ref().len()
-                                    );
-                                }
-                            }
-                            Either6::Sixth(Either::First(wind_direction)) => {
-                                if let Some(direction) = decode_f32(wind_direction.as_ref()) {
-                                    CHANNEL
-                                        .send(BleDataUpdate::WindDirection { direction })
-                                        .await
-                                } else {
-                                    info!(
-                                        "Wind direction update had invalid length: {}",
-                                        wind_direction.as_ref().len()
-                                    );
-                                }
-                            }
-                            Either6::Sixth(Either::Second(wind_speed)) => {
-                                if let Some(speed) = decode_f32(wind_speed.as_ref()) {
-                                    CHANNEL.send(BleDataUpdate::WindSpeed { speed }).await
-                                } else {
-                                    info!(
-                                        "Wind speed update had invalid length: {}",
-                                        wind_speed.as_ref().len()
-                                    );
-                                }
-                            }
-                        },
+                        Either::Second(_) => {
+                            read_full_snapshot(
+                                &client,
+                                &light_level_characteristic,
+                                &temperature_characteristic,
+                                &humidity_characteristic,
+                                &pressure_characteristic,
+                                &precipitation_characteristic,
+                                &wind_direction_characteristic,
+                                &wind_speed_characteristic,
+                            )
+                            .await;
+                        }
                     }
                 }
             };

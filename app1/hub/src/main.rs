@@ -22,8 +22,6 @@ mod resources;
 
 use resources::*;
 
-use crate::ble::BleDataUpdate;
-
 esp_bootloader_esp_idf::esp_app_desc!();
 
 static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
@@ -79,17 +77,9 @@ async fn main(spawner: Spawner) {
     join3(
         async {
             loop {
-                let update = ble::next_message().await;
+                let snapshot = ble::next_message().await;
                 let mut data = data.lock().await;
-                match update {
-                    BleDataUpdate::Temperature { temperature } => data.temperature = temperature,
-                    BleDataUpdate::Humidity { humidity } => data.humidity = humidity,
-                    BleDataUpdate::Pressure { pressure } => data.pressure = pressure,
-                    BleDataUpdate::Light { level } => data.light_level = level,
-                    BleDataUpdate::WindDirection { direction } => data.wind_direction = direction,
-                    BleDataUpdate::WindSpeed { speed } => data.wind_speed = speed,
-                    BleDataUpdate::Precipitation { mm } => data.precipitation = mm,
-                }
+                *data = snapshot;
                 SERVER_TX_CHANNEL
                     .send(UartMessage::Data(data.clone()))
                     .await;

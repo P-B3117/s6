@@ -23,4 +23,6 @@ pub struct GattObjectTransferService {
     pub wind_direction: f32,
     #[characteristic(uuid = characteristic::APPARENT_WIND_SPEED, write, read, notify)]
     pub wind_speed: f32,
+    #[characteristic(uuid = characteristic::NEW_ALERT, write, read, notify)]
+    pub updates: u32,
 }

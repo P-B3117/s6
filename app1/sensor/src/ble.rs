@@ -38,6 +38,7 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
     let _ = join(host.runner.run(), async {
         loop {
             if let Ok(conn) = advertise(&mut host.peripheral, &server).await {
+                let updates = 0u32;
                 loop {
                     match select(conn.next(), CHANNEL.wait()).await {
                         Either::First(GattConnectionEvent::Disconnected { reason }) => {
@@ -77,6 +78,13 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
                                     server.meteo_service.precipitation.notify(&conn, &mm).await
                                 }
                             } {
+                                esp_println::println!("BLE notify error: {:?}", e);
+                            }
+
+                            let updates = updates.wrapping_add(1);
+                            if let Err(e) =
+                                server.meteo_service.updates.notify(&conn, &updates).await
+                            {
                                 esp_println::println!("BLE notify error: {:?}", e);
                             }
                         }
