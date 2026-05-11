@@ -78,6 +78,8 @@ async fn read_full_snapshot<C, P, const MAX_SERVICES: usize>(
         }
     }
 
+    snapshot.from_uart = 0;
+
     CHANNEL.send(snapshot).await;
 }
 

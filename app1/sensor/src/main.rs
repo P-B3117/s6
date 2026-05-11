@@ -27,8 +27,8 @@ use crate::sensors::SensorDataUpdate;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static HUB_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static HUB_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static HUB_SENSOR_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SENSOR_HUB_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
 static UPDATE_DATA: Channel<CriticalSectionRawMutex, SensorDataUpdate, 10> = Channel::new();
 
 #[esp_rtos::main]
@@ -44,11 +44,16 @@ async fn main(spawner: Spawner) {
 
     let uart = init_uart(
         peripherals.UART1,
-        peripherals.GPIO10, // TX1D
-        peripherals.GPIO9,  // RX1D
+        peripherals.GPIO12, // TX1D
+        peripherals.GPIO39, // RX1D
     );
     spawner.spawn(
-        uart_runner_wrapper0(uart, HUB_RX_CHANNEL.sender(), HUB_TX_CHANNEL.receiver()).unwrap(),
+        uart_runner_wrapper0(
+            uart,
+            HUB_SENSOR_CHANNEL.sender(),
+            SENSOR_HUB_CHANNEL.receiver(),
+        )
+        .unwrap(),
     );
     info!("Uart initialized!");
 
@@ -67,7 +72,7 @@ async fn main(spawner: Spawner) {
         async {
             loop {
                 let update = UPDATE_DATA.receive().await;
-                esp_println::println!("Received update: {:?}", &update);
+                esp_println::println!("Received update: {:?}\r", &update);
                 let mut data = data.lock().await;
                 match update {
                     SensorDataUpdate::Temperature { temperature } => data.temperature = temperature,
@@ -84,10 +89,14 @@ async fn main(spawner: Spawner) {
             }
         },
         async {
+            esp_println::println!("Starting Uart injector loop");
             loop {
-                if let UartMessage::AskData = HUB_RX_CHANNEL.receive().await {
-                    let data = data.lock().await.clone();
-                    HUB_TX_CHANNEL.send(UartMessage::Data(data)).await;
+                if let UartMessage::AskData = HUB_SENSOR_CHANNEL.receive().await {
+                    esp_println::println!("got data from uart");
+                    let mut data = data.lock().await.clone();
+                    data.from_uart = 1;
+                    esp_println::println!("sending to hub\r");
+                    SENSOR_HUB_CHANNEL.send(UartMessage::Data(data)).await;
                 }
             }
         },

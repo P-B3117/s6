@@ -24,10 +24,10 @@ use resources::*;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-static SENSOR_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static SENSOR_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static SERVER_RX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
-static SERVER_TX_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SENSOR_HUB_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static HUB_SENSOR_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static SERVER_HUB_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
+static HUB_SERVER_CHANNEL: Channel<CriticalSectionRawMutex, UartMessage, 3> = Channel::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
@@ -49,23 +49,23 @@ async fn main(spawner: Spawner) {
     spawner.spawn(
         uart_runner_wrapper0(
             uart,
-            SERVER_RX_CHANNEL.sender(),
-            SERVER_TX_CHANNEL.receiver(),
+            SERVER_HUB_CHANNEL.sender(), // receive from server and send to channel
+            HUB_SERVER_CHANNEL.receiver(), // take the message  from channel and send to server
         )
         .unwrap(),
     );
     info!("Sensor uart initialized!");
 
-    let uart = init_uart(
+    let uart1 = init_uart(
         peripherals.UART1,
-        peripherals.GPIO10, // TX1D
-        peripherals.GPIO9,  // RX1D
+        peripherals.GPIO14, // TX1D
+        peripherals.GPIO12, // RX1D
     );
     spawner.spawn(
         uart_runner_wrapper1(
-            uart,
-            SENSOR_RX_CHANNEL.sender(),
-            SENSOR_TX_CHANNEL.receiver(),
+            uart1,
+            SENSOR_HUB_CHANNEL.sender(), // receive from sensor and send to channel
+            HUB_SENSOR_CHANNEL.receiver(), // take the message from channel and send to sensor
         )
         .unwrap(),
     );
@@ -76,27 +76,39 @@ async fn main(spawner: Spawner) {
 
     join3(
         async {
+            // BLE to server loop
             loop {
-                let snapshot = ble::next_message().await;
+                let snapshot = ble::next_message().await; // when we get a new BLE message
                 let mut data = data.lock().await;
                 *data = snapshot;
-                SERVER_TX_CHANNEL
+                // send data to server
+                HUB_SERVER_CHANNEL
                     .send(UartMessage::Data(data.clone()))
                     .await;
             }
         },
         async {
+            // Hub to server loop
             loop {
-                if let UartMessage::AskData = SERVER_RX_CHANNEL.receive().await {
+                // if server asks for data
+                if let UartMessage::AskData = SERVER_HUB_CHANNEL.receive().await {
                     let data = data.lock().await.clone();
-                    SERVER_TX_CHANNEL.send(UartMessage::Data(data)).await;
+                    // send last data to server
+                    HUB_SERVER_CHANNEL.send(UartMessage::Data(data)).await;
+                    esp_println::println!("Asking for data from sensor\r");
+                    HUB_SENSOR_CHANNEL.send(UartMessage::AskData).await;
                 }
             }
         },
         async {
             loop {
-                if let UartMessage::Data(new_data) = SENSOR_RX_CHANNEL.receive().await {
+                if let UartMessage::Data(new_data) = SENSOR_HUB_CHANNEL.receive().await {
+                    esp_println::println!("RECEIVED for data from sensor\r");
+                    let to_send = UartMessage::Data(new_data.clone());
+                    // update local data
                     *data.lock().await = new_data;
+                    // send data to server
+                    HUB_SERVER_CHANNEL.send(to_send).await;
                 }
             }
         },

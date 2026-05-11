@@ -9,4 +9,5 @@ pub struct MeteoData {
     pub precipitation: f32,  // mm/s
     pub wind_direction: f32, // degrees
     pub wind_speed: f32,     // km/h
+    pub from_uart: u8,
 }

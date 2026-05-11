@@ -1,6 +1,7 @@
 use embassy_futures::join::join;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
+use embedded_io_async::Write;
 use esp_hal::Async;
 use esp_hal::gpio::AnyPin;
 use esp_hal::uart::{AtCmdConfig, Config, Instance, Uart};
@@ -9,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::data::MeteoData;
 
 // Read Buffer Size
-pub const BUF_SIZE: usize = 512;
-pub const PIPE_SIZE: usize = 128;
-pub const UART_SIZE: usize = 128;
+pub const BUF_SIZE: usize = 1024;
+pub const PIPE_SIZE: usize = 256;
+pub const UART_SIZE: usize = 256;
 
 // End of Transmission Character (Carrige Return -> 13 or 0x0D in ASCII)
 const AT_CMD: u8 = 0x0D;
@@ -72,7 +73,9 @@ pub async fn uart_runner(
                         read += len as usize;
                         if read_buffer[..read].contains(&AT_CMD) {
                             match serde_json::from_slice(&read_buffer[..read]) {
-                                Ok(data) => message_channel.send(data).await,
+                                Ok(data) => {
+                                    message_channel.send(data).await;
+                                }
                                 Err(e) => {
                                     esp_println::println!("JSON Error: {:?}", e);
                                     esp_println::println!("{:?}", &read_buffer[..read]);
@@ -89,8 +92,8 @@ pub async fn uart_runner(
             loop {
                 let data = send_message_channel.receive().await;
                 let payload = serde_json::to_string(&data).unwrap();
-                tx.write_async(payload.as_bytes()).await.unwrap();
-                tx.write_async(b"\n").await.unwrap();
+                tx.write_all(payload.as_bytes()).await.unwrap();
+                tx.write_all(b"\n\r").await.unwrap();
                 tx.flush_async().await.unwrap();
             }
         },
