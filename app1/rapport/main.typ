@@ -13,7 +13,7 @@
 
 = Possibilités d'utilisation de nouveaux capteurs
 
-TODO voir si il rested des gpio/i2c disponibles
+TODO voir si il rested des gpio/i2c disponibles (sike I2C peut avoir une chier d'addresses différentes sur le meme bus)
 
 = Changements à apporter pour une version commerciale
 

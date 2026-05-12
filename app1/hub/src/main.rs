@@ -45,6 +45,7 @@ async fn main(spawner: Spawner) {
         peripherals.UART0,
         peripherals.GPIO1, // TX0D
         peripherals.GPIO3, // RX0D
+        false,
     );
     spawner.spawn(
         uart_runner_wrapper0(
@@ -60,6 +61,7 @@ async fn main(spawner: Spawner) {
         peripherals.UART1,
         peripherals.GPIO14, // TX1D
         peripherals.GPIO12, // RX1D
+        true,
     );
     spawner.spawn(
         uart_runner_wrapper1(
@@ -94,8 +96,9 @@ async fn main(spawner: Spawner) {
                 if let UartMessage::AskData = SERVER_HUB_CHANNEL.receive().await {
                     let data = data.lock().await.clone();
                     // send last data to server
-                    HUB_SERVER_CHANNEL.send(UartMessage::Data(data)).await;
+                    // HUB_SERVER_CHANNEL.send(UartMessage::Data(data)).await;
                     esp_println::println!("Asking for data from sensor\r");
+                    // ask sensor for data, will receive a response soon
                     HUB_SENSOR_CHANNEL.send(UartMessage::AskData).await;
                 }
             }

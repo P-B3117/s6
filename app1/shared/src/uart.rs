@@ -4,7 +4,7 @@ use embassy_sync::channel::{Receiver, Sender};
 use embedded_io_async::Write;
 use esp_hal::Async;
 use esp_hal::gpio::AnyPin;
-use esp_hal::uart::{AtCmdConfig, Config, Instance, RxConfig, Uart};
+use esp_hal::uart::{AtCmdConfig, Config, Instance, RxConfig, SwFlowControl, Uart};
 use serde::{Deserialize, Serialize};
 
 use crate::data::MeteoData;
@@ -28,12 +28,25 @@ pub fn init_uart(
     uart: impl Instance + 'static,
     tx_pin: impl Into<AnyPin<'static>>,
     rx_pin: impl Into<AnyPin<'static>>,
+    flow_ctrl: bool,
 ) -> Uart<'static, Async> {
-    let mut uart = Uart::new(uart, Config::default())
-        .unwrap()
-        .with_tx(tx_pin.into())
-        .with_rx(rx_pin.into())
-        .into_async();
+    let mut uart = Uart::new(
+        uart,
+        Config::default().with_sw_flow_ctrl(if flow_ctrl {
+            SwFlowControl::Enabled {
+                xon_char: 0x02,
+                xoff_char: 0x03,
+                xon_threshold: 32,
+                xoff_threshold: 100,
+            }
+        } else {
+            SwFlowControl::Disabled
+        }),
+    )
+    .unwrap()
+    .with_tx(tx_pin.into())
+    .with_rx(rx_pin.into())
+    .into_async();
     uart.set_at_cmd(AtCmdConfig::default().with_cmd_char(AT_CMD));
     uart
 }
