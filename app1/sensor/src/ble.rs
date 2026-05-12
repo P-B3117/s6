@@ -2,17 +2,17 @@ use defmt::info;
 use embassy_futures::join::join;
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
+use embassy_sync::channel::Channel;
 use esp_radio::ble::controller::BleConnector;
 use shared::ble::{GattServer, SENSOR_ADDR};
 use trouble_host::prelude::*;
 
 use crate::sensors::SensorDataUpdate;
 
-static CHANNEL: Signal<CriticalSectionRawMutex, SensorDataUpdate> = Signal::new();
+static CHANNEL: Channel<CriticalSectionRawMutex, SensorDataUpdate, 10> = Channel::new();
 
 pub fn send_message(message: SensorDataUpdate) {
-    CHANNEL.signal(message)
+    CHANNEL.try_send(message).ok();
 }
 
 #[embassy_executor::task]
@@ -40,7 +40,7 @@ pub async fn ble_runner(resources: crate::resources::BluetoothResources<'static>
             if let Ok(conn) = advertise(&mut host.peripheral, &server).await {
                 let updates = 0u32;
                 loop {
-                    match select(conn.next(), CHANNEL.wait()).await {
+                    match select(conn.next(), CHANNEL.receive()).await {
                         Either::First(GattConnectionEvent::Disconnected { reason }) => {
                             info!("[adv] disconnected: {:?}", reason);
                             break;
