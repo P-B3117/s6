@@ -13,18 +13,18 @@
 
 = Possibilités d'utilisation de nouveaux capteurs
 
-TODO voir si il rested des gpio/i2c disponibles (sike I2C peut avoir une chier d'addresses différentes sur le meme bus)
+TODO voir si il rested des gpio/i2c disponibles (sike I2C peut avoir une chier d'addresses différentes sur le meme bus, si jamais 2 addresses pareil, utiliser un multiplexeur I2C)
 
 = Changements à apporter pour une version commerciale
 
 == Microcontrôleur
 
-TODO voir si version moins chere
+TODO voir si version moins chere (package ANA112B)
 
 == Interface des capteurs
 
-TODO
+// TODO HEIN?
 
 == Réseaux sans fil
 
-TODO parler de zigbee
+TODO parler de zigbee (fuck that, LoraWan is better, juste à dire qu'on utilise un chip LoRaWAN de stm32, ça se trouve easy)
