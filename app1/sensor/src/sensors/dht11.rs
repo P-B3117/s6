@@ -81,7 +81,10 @@ pub async fn runner(
         // let temperature_decimals = buffer[3];
         let checksum = buffer[4];
 
-        let sum = buffer[0..=3].iter().sum::<u8>();
+        let sum = buffer[0]
+            .wrapping_add(buffer[1])
+            .wrapping_add(buffer[2])
+            .wrapping_add(buffer[3]);
         if checksum != sum {
             esp_println::println!("DHT11 checksum failed, {:?}", buffer);
             continue 'scan;
