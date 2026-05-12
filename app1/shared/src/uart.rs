@@ -4,7 +4,7 @@ use embassy_sync::channel::{Receiver, Sender};
 use embedded_io_async::Write;
 use esp_hal::Async;
 use esp_hal::gpio::AnyPin;
-use esp_hal::uart::{AtCmdConfig, Config, Instance, Uart};
+use esp_hal::uart::{AtCmdConfig, Config, Instance, RxConfig, Uart};
 use serde::{Deserialize, Serialize};
 
 use crate::data::MeteoData;

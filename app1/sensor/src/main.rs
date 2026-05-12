@@ -94,7 +94,7 @@ async fn main(spawner: Spawner) {
                 if let UartMessage::AskData = HUB_SENSOR_CHANNEL.receive().await {
                     esp_println::println!("got data from uart");
                     let mut data = data.lock().await.clone();
-                    data.from_uart = 1;
+                    data.u = 1;
                     esp_println::println!("sending to hub\r");
                     SENSOR_HUB_CHANNEL.send(UartMessage::Data(data)).await;
                 }
