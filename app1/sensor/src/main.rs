@@ -61,8 +61,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(ble::ble_runner(resources.bt).unwrap());
     info!("Bluetooth initialized!");
 
-    // spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
-    // spawner.spawn(sensors::dps310::runner(resources.dps310, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::dht11::runner(resources.dht11, &UPDATE_DATA).unwrap());
+    spawner.spawn(sensors::dps310::runner(resources.dps310, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::adc::runner(resources.adc, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::rain::runner(resources.rain, &UPDATE_DATA).unwrap());
     spawner.spawn(sensors::wind::runner(resources.wind, &UPDATE_DATA).unwrap());

@@ -19,7 +19,7 @@ pub async fn runner(
     let input_config = InputConfig::default();
     pin.apply_input_config(&input_config);
 
-    loop {
+    'scan: loop {
         Timer::after_secs(2).await;
 
         pin.set_output_enable(true);
@@ -31,9 +31,9 @@ pub async fn runner(
 
         let start = Instant::now();
         while pin.is_high() {
-            if start.elapsed().as_millis() > 1000 {
+            if start.elapsed().as_millis() > 100 {
                 esp_println::println!("DHT11 Wait for low timeout.");
-                continue;
+                continue 'scan;
             }
         }
 
@@ -41,19 +41,32 @@ pub async fn runner(
             block_for(Duration::from_micros(80));
             if pin.is_low() {
                 esp_println::println!("DHT11 Wait for high timeout.");
-                continue;
+                continue 'scan;
             }
         }
         block_for(Duration::from_micros(80));
         buffer.fill(0);
         for byte in 0..5 {
             for bit in 0..8u8 {
-                while pin.is_low() {}
+                let start = Instant::now();
+                while pin.is_low() {
+                    if start.elapsed().as_micros() > 100 {
+                        esp_println::println!("DHT11 Wait for byte start high timeout.");
+                        continue 'scan;
+                    }
+                }
                 block_for(Duration::from_micros(30));
                 if pin.is_high() {
                     buffer[byte] |= 1 << (7 - bit);
+                } else {
+                    let start = Instant::now();
+                    while pin.is_high() {
+                        if start.elapsed().as_micros() > 1000 {
+                            esp_println::println!("DHT11 Wait for byte end low timeout.");
+                            continue 'scan;
+                        }
+                    }
                 }
-                while pin.is_high() {}
             }
         }
 
@@ -71,7 +84,7 @@ pub async fn runner(
         let sum = buffer[0..=3].iter().sum::<u8>();
         if checksum != sum {
             esp_println::println!("DHT11 checksum failed, {:?}", buffer);
-            continue;
+            continue 'scan;
         }
 
         update_data
