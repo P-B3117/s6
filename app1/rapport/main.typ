@@ -64,7 +64,7 @@ L'utilisation d'une antenne LoRa externe est cependant nécessaire. La beautée 
 
 La distance parcourue peut être de même des kilomêtres si nécessaire et, compte tenu de sa basse fréquence, elle peut passer à travers des obstacles sans problèmes.
 
-#pagebreak()
+// #pagebreak()
 === Zigbee
 
 La technologie Zigbee est une autre option pour le réseau sans fil, offrant une portée plus longue que BLE et une consommation d'énergie plus faible que LoRa. Cependant, elle nécessite également une configuration plus complexe et l'utilisation d'une antenne externe. En contrepartie, elle permet une communication bidirectionnelle sécurisée entre les stations météo et la station de base.
